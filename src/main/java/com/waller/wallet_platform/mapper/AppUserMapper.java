@@ -12,7 +12,8 @@ public interface AppUserMapper {
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
-    @Mapping(target = "role", ignore = true)
+    @Mapping(target = "role", constant = "USER")
+    @Mapping(target = "passwordHash",  source = "password")
     AppUser requestToEntity(AppUserRequest request);
 
 }

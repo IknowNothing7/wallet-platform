@@ -21,10 +21,15 @@ public class AppUserServiceImp implements AppUserService{
 
         @Override
         public ApiResponse<AppUser> createUser(AppUserRequest request) {
-
             AppUser user = userMapper.requestToEntity(request);
+
+            try {
             userRepository.save(user);
             log.info("User was succesfully saved in the database" + user.getEmail());
+            } catch (Exception e) {
+                log.error(e.getMessage());
+            }
+
 
             return ApiResponse.ok(user);
         }

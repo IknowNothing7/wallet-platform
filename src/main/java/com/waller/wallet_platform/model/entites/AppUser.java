@@ -4,7 +4,9 @@ import java.io.Serializable;
 import java.time.Instant;
 
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
 
 import com.waller.wallet_platform.model.enums.UserRole;
 
@@ -49,6 +51,8 @@ public class AppUser implements Serializable{
     private String passwordHash;
 
     @Enumerated(EnumType.STRING)
-    private UserRole role;
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "role", nullable = false, columnDefinition = "user_role")
+    private UserRole role = UserRole.USER;
 
 }
