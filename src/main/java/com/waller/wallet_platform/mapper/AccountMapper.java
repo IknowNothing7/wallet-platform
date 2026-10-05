@@ -10,13 +10,19 @@ import com.waller.wallet_platform.model.request.AccountRequest;
 @Mapper(componentModel = "spring")
 public interface AccountMapper {
 
+    @Mapping(target = "updatedAt", ignore = true)
+    @Mapping(target = "userId", ignore = true)
     AccountDto toAccountDto(Account account);
 
+    @Mapping(target = "updatedAt", ignore = true)
+    @Mapping(target = "user", ignore = true)
+    @Mapping(target = "version", ignore = true)
     Account toAccountEntity(AccountDto dto);
 
     @Mapping(target = "id", ignore = true)
-    @Mapping(target = "created", ignore = true)
-    @Mapping(target = "deleted", constant = "false")
+    @Mapping(target = "createdAt", ignore = true)
+    @Mapping(target = "updatedAt", ignore = true)
+    @Mapping(target = "user", ignore = true)
     Account createAnAccount(AccountRequest request);
 
 }

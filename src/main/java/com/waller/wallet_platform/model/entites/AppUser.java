@@ -37,7 +37,7 @@ public class AppUser implements Serializable{
 
     @Column(name = "updated_at", nullable = false, updatable = false)
     @UpdateTimestamp
-    private Instant updateddAt;
+    private Instant updatedAt;
 
     @Column(nullable = false)
     private String name;
