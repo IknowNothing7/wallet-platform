@@ -8,7 +8,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.waller.wallet_platform.model.request.AppUserRequest;
-import com.waller.wallet_platform.service.AppUserService;
 import com.waller.wallet_platform.service.AppUserServiceImp;
 
 import lombok.RequiredArgsConstructor;

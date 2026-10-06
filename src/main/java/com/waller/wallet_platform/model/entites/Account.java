@@ -4,6 +4,8 @@ import java.io.Serializable;
 import java.time.Instant;
 
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import com.waller.wallet_platform.model.enums.AccountStatus;
 import com.waller.wallet_platform.model.enums.AccountType;
@@ -53,12 +55,14 @@ public class Account implements Serializable {
     private int version;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status")
-    private AccountStatus status;
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = " status", nullable = false, columnDefinition = "account_status")
+    private AccountStatus status = AccountStatus.ACTIVE;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "type")
-    private AccountType type;
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "type", nullable = false, columnDefinition = "account_type")
+    private AccountType type =AccountType.USER;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "user_id", nullable = false)

@@ -29,7 +29,7 @@ import lombok.Setter;
 @NoArgsConstructor
 @Getter
 @Setter
-public class Deposit {
+public class Deposit implements Serializable{
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
