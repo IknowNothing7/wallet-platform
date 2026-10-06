@@ -3,15 +3,23 @@ package com.waller.wallet_platform.model.request;
 import java.io.Serializable;
 
 import jakarta.validation.constraints.NotNull;
-import lombok.Builder;
+import jakarta.validation.constraints.Pattern;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
-@Builder 
-public class AccountRequest implements Serializable{
+@NoArgsConstructor
+@AllArgsConstructor
+@Getter
+@Setter
+public class AccountRequest implements Serializable {
 
-
+    @NotNull(message = "Currency can not be empty")
+    @Pattern(regexp = "[A-Z]{3}", message = "Currency must be a 3-letter ISO code")
     private String currency;
-    private int balance;
+
     @NotNull(message = "UserId can not be empty")
-    private int userId;
+    private Long userId;
 
 }

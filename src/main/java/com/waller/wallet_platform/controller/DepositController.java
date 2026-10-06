@@ -1,32 +1,31 @@
 package com.waller.wallet_platform.controller;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.waller.wallet_platform.model.dto.DepositDto;
 import com.waller.wallet_platform.model.request.DepositRequest;
-import com.waller.wallet_platform.service.DeposiServiceImpl;
+import com.waller.wallet_platform.model.response.ApiResponse;
+import com.waller.wallet_platform.service.DepositService;
 
-import io.swagger.v3.oas.annotations.parameters.RequestBody;
-import lombok.Getter;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import lombok.Setter;
-import lombok.extern.slf4j.Slf4j;
 
-@RestController 
+@RestController
+@RequiredArgsConstructor
 @RequestMapping("/deposit")
-@Slf4j 
-@RequiredArgsConstructor 
-@Getter 
-@Setter 
 public class DepositController {
-    
-    private final DeposiServiceImpl depositService;
 
+    private final DepositService depositService;
 
     @PostMapping("/create")
-    public void createDeposit( @RequestBody DepositRequest request){
-            depositService.createDeposit(request);
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<DepositDto> createDeposit(@Valid @RequestBody DepositRequest request) {
+        return ApiResponse.ok(depositService.createDeposit(request));
     }
 
 }

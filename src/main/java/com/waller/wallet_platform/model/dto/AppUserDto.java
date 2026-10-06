@@ -9,9 +9,9 @@ import lombok.Builder;
 
 @Builder
 public record AppUserDto(
-        int id,
+        Long id,
         Instant createdAt,
-        Instant updatetAt,
+        Instant updatedAt,
         String name,
         String email,
         UserRole role) implements Serializable {

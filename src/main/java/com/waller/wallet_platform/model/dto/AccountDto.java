@@ -10,14 +10,14 @@ import lombok.Builder;
 
 @Builder
 public record AccountDto(
-        int id,
+        Long id,
         Instant createdAt,
         Instant updatedAt,
-        int balance,
+        Long balance,
         String currency,
         AccountType type,
         AccountStatus status,
-        int userId
+        Long userId
 
 ) implements Serializable {
 

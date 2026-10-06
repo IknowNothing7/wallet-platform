@@ -2,33 +2,39 @@ package com.waller.wallet_platform.model.request;
 
 import java.io.Serializable;
 
-import com.waller.wallet_platform.model.enums.DepositStatus;
-
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-@AllArgsConstructor 
-@Getter 
-@Setter  
-public class DepositRequest implements Serializable{
+@NoArgsConstructor
+@AllArgsConstructor
+@Getter
+@Setter
+public class DepositRequest implements Serializable {
 
     @NotNull(message = "account id can not be null")
-    private int accountId;
+    private Long accountId;
 
     @NotNull(message = "amount can not be null")
-    private int amount;
+    @Positive(message = "amount must be positive")
+    private Long amount;
 
     @NotNull(message = "currency can not be null")
-    private char currency;
+    @Pattern(regexp = "[A-Z]{3}", message = "currency must be a 3-letter ISO code")
+    private String currency;
 
-    @NotNull(message = "gatewayString can not be null")
-    private String gatewayString;
+    @NotBlank(message = "gateway can not be empty")
+    @Size(max = 50)
+    private String gateway;
 
-    @NotNull(message = "gatewayReference can not be null")
+    @NotBlank(message = "gatewayReference can not be empty")
+    @Size(max = 255)
     private String gatewayReference;
-
-    private DepositStatus status = DepositStatus.PENDING;
 
 }

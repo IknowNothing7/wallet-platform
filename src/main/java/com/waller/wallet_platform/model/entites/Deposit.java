@@ -4,7 +4,9 @@ import java.io.Serializable;
 import java.time.Instant;
 
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
 
 import com.waller.wallet_platform.model.enums.DepositStatus;
 
@@ -29,7 +31,7 @@ import lombok.Setter;
 @NoArgsConstructor
 @Getter
 @Setter
-public class Deposit implements Serializable{
+public class Deposit implements Serializable {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -50,8 +52,9 @@ public class Deposit implements Serializable{
     @Column(nullable = false)
     private long amount;
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(nullable = false, length = 3)
-    private char currency;
+    private String currency;
 
     @Column(nullable = false, length = 50)
     private String gateway;
@@ -60,8 +63,9 @@ public class Deposit implements Serializable{
     private String gatewayReference;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false)
-    private DepositStatus status;
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "status", nullable = false, columnDefinition = "deposit_status")
+    private DepositStatus status = DepositStatus.PENDING;
 
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "journal_entry_id")
