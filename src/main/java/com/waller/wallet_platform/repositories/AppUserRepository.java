@@ -2,8 +2,8 @@ package com.waller.wallet_platform.repositories;
 
 import java.util.Optional;
 
-import org.springdoc.core.converters.models.Pageable;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -17,6 +17,8 @@ public interface AppUserRepository extends JpaRepository<AppUser, Long> {
     Optional<AppUser> findByName(String name);
 
     Optional<AppUser> findByEmail(String email);
+
+    boolean existsByEmail(String email);
 
     Page<AppUser> findAll(Pageable page);
 

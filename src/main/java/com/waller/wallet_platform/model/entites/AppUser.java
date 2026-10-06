@@ -4,7 +4,9 @@ import java.io.Serializable;
 import java.time.Instant;
 
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
 
 import com.waller.wallet_platform.model.enums.UserRole;
 
@@ -25,7 +27,7 @@ import lombok.Setter;
 @Setter
 @NoArgsConstructor
 @Table(name = "app_user")
-public class AppUser implements Serializable{
+public class AppUser implements Serializable {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -35,9 +37,9 @@ public class AppUser implements Serializable{
     @CreationTimestamp
     private Instant createdAt;
 
-    @Column(name = "updated_at", nullable = false, updatable = false)
+    @Column(name = "updated_at", nullable = false)
     @UpdateTimestamp
-    private Instant updateddAt;
+    private Instant updatedAt;
 
     @Column(nullable = false)
     private String name;
@@ -49,6 +51,8 @@ public class AppUser implements Serializable{
     private String passwordHash;
 
     @Enumerated(EnumType.STRING)
-    private UserRole role;
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "role", nullable = false, columnDefinition = "user_role")
+    private UserRole role = UserRole.USER;
 
 }
