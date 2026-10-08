@@ -3,7 +3,6 @@ package com.waller.wallet_platform.security;
 import com.waller.wallet_platform.model.constants.AuthenticationConstants;
 import com.waller.wallet_platform.model.entites.AppUser;
 import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
@@ -24,10 +23,6 @@ import java.util.List;
 @RequiredArgsConstructor 
 public class JwtTokenProvider {
 
-        private final SecretKey secretKey;
-        private final Long jwtValidityInMilliseconds;
-
-
     @Value("${jwt.secret}")
     private String secret;
 
@@ -37,7 +32,9 @@ public class JwtTokenProvider {
     public String generateToken(AppUser user) {
         return Jwts.builder()
                 .subject(user.getEmail())
-                .claim("role", user.getRole())
+                .claim(AuthenticationConstants.USER_ID, user.getId())
+                .claim(AuthenticationConstants.USERNAME, user.getName())
+                .claim(AuthenticationConstants.ROLE, List.of(user.getRole().name()))
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + lifetime))
                 .signWith(signingKey())
@@ -69,7 +66,7 @@ public class JwtTokenProvider {
         return Keys.hmacShaKeyFor(Decoders.BASE64.decode(secret));
     }
 
-        public String getUsername(String token) {
+    public String getUsername(String token) {
         Claims claims = getAllClaimsFromToken(token);
         return claims.get(AuthenticationConstants.USERNAME, String.class);
     }
@@ -80,24 +77,12 @@ public class JwtTokenProvider {
     }
 
     public List<String> getRoles(String token) {
-        return getAllClaimsFromToken(token).get(AuthenticationConstants.ROLE, List.class);
+        List<?> roles = getAllClaimsFromToken(token).get(AuthenticationConstants.ROLE, List.class);
+        return roles == null ? List.of() : roles.stream().map(String::valueOf).toList();
     }
 
     private Claims getAllClaimsFromToken(String token) {
-        try {
-            return Jwts.parserBuilder()
-                    .setSigningKey(secretKey)
-                    .build()
-                    .parseClaimsJws(token)
-                    .getBody();
-        } catch (ExpiredJwtException e) {
-            return e.getClaims();
-        }
-    }
-
-    private SecretKey getKey(String secretKey64) {
-        byte[] decode64 = Decoders.BASE64.decode(secretKey64);
-        return Keys.hmacShaKeyFor(decode64);
+        return parseClaims(token);
     }
 }
 

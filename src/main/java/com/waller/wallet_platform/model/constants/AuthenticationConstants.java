@@ -2,7 +2,7 @@ package com.waller.wallet_platform.model.constants;
 
 import lombok.NoArgsConstructor;
 
-@NoArgsConstructor(access = AccessLevel.PUBLIC)
+@NoArgsConstructor
 public class AuthenticationConstants {
 
     public static final String USER_ID = "user_id";
