@@ -25,6 +25,7 @@ import jakarta.persistence.Table;
 @Getter
 @Setter
 @Builder
+@NoArgsConstructor
 @AllArgsConstructor
 public class AppUser implements Serializable {
 
@@ -52,6 +53,7 @@ public class AppUser implements Serializable {
     @Enumerated(EnumType.STRING)
     @JdbcTypeCode(SqlTypes.NAMED_ENUM)
     @Column(name = "role", nullable = false, columnDefinition = "user_role")
+    @Builder.Default
     private UserRole role = UserRole.USER;
 
 }

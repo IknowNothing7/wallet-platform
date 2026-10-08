@@ -24,7 +24,7 @@ public class JwtTokenProvider {
 
     public String generateToken(AppUser user) {
         return Jwts.builder()
-                .subject(user.GetEmail())
+                .subject(user.getEmail())
                 .claim("role", user.getRole())
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + lifetime))
