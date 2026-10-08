@@ -3,6 +3,7 @@ package com.waller.wallet_platform.model.entites;
 import java.io.Serializable;
 import java.time.Instant;
 
+import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
@@ -18,15 +19,14 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 @Entity
+@Table(name = "app_user")
 @Getter
 @Setter
+@Builder
 @NoArgsConstructor
-@Table(name = "app_user")
+@AllArgsConstructor
 public class AppUser implements Serializable {
 
     @Id
@@ -53,6 +53,7 @@ public class AppUser implements Serializable {
     @Enumerated(EnumType.STRING)
     @JdbcTypeCode(SqlTypes.NAMED_ENUM)
     @Column(name = "role", nullable = false, columnDefinition = "user_role")
+    @Builder.Default
     private UserRole role = UserRole.USER;
 
 }

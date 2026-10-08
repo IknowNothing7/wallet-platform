@@ -20,6 +20,9 @@ public interface AppUserRepository extends JpaRepository<AppUser, Long> {
 
     boolean existsByEmail(String email);
 
-    Page<AppUser> findAll(Pageable page);
+    boolean existsByName(String name);
+
+    Page<AppUser> findAll(Pageable page);     
+
 
 }

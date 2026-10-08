@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.waller.wallet_platform.model.dto.AppUserDto;
-import com.waller.wallet_platform.model.request.AppUserRequest;
+import com.waller.wallet_platform.model.request.AppUser.AppUserRequest;
 import com.waller.wallet_platform.model.response.ApiResponse;
 import com.waller.wallet_platform.service.AppUserService;
 
