@@ -20,9 +20,9 @@ public class AccessValidator {
 
         public void validateNewUser(String username, String email, String password, String confirmPassword) {
 
-        userRepository.findByUsername(username).ifPresent(existingUser -> {
+        if (userRepository.existsByName(username)) {
             throw new DataExistException(ApiLogErrors.USER_ALREADY_EXIST.getMessage(username));
-        });
+        }
         userRepository.findByEmail(email).ifPresent(existingEmail -> {
             throw new DataExistException(ApiLogErrors.EMAIL_ALREADY_EXIST.getMessage(email));
         });

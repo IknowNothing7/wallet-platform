@@ -1,4 +1,4 @@
-package com.waller.wallet_platform.service;
+package com.waller.wallet_platform.service.impl;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -9,8 +9,10 @@ import org.springframework.web.server.ResponseStatusException;
 import com.waller.wallet_platform.mapper.AppUserMapper;
 import com.waller.wallet_platform.model.dto.AppUserDto;
 import com.waller.wallet_platform.model.entites.AppUser;
-import com.waller.wallet_platform.model.request.AppUserRequest;
+import com.waller.wallet_platform.model.request.AppUser.AppUserRequest;
 import com.waller.wallet_platform.repositories.AppUserRepository;
+
+import com.waller.wallet_platform.service.AppUserService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

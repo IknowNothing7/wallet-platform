@@ -1,4 +1,4 @@
-package com.waller.wallet_platform.service;
+package com.waller.wallet_platform.service.impl;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -12,6 +12,8 @@ import com.waller.wallet_platform.model.entites.AppUser;
 import com.waller.wallet_platform.model.request.AccountRequest;
 import com.waller.wallet_platform.repositories.AccountRepository;
 import com.waller.wallet_platform.repositories.AppUserRepository;
+
+import com.waller.wallet_platform.service.AccountService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
