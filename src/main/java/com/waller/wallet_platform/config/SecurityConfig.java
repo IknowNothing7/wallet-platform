@@ -5,6 +5,8 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -28,6 +30,9 @@ import lombok.RequiredArgsConstructor;
 @EnableMethodSecurity 
 public class SecurityConfig {
 
+    private static final String UNAUTHORIZED_BODY =
+            "{\"message\":\"Authentication required\",\"payload\":null,\"success\":false}";
+
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
 
     // Exact origins of the frontends allowed to call the API, comma-separated
@@ -49,6 +54,13 @@ public class SecurityConfig {
                         ).permitAll()
                         .anyRequest().authenticated()
                 )
+                // Missing, expired or revoked token: 401 (the default for stateless JWT is a bare 403),
+                // so clients know to refresh; body in the ApiResponse shape like every other error
+                .exceptionHandling(ex -> ex.authenticationEntryPoint((request, response, e) -> {
+                    response.setStatus(HttpStatus.UNAUTHORIZED.value());
+                    response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                    response.getWriter().write(UNAUTHORIZED_BODY);
+                }))
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();
     }

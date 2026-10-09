@@ -113,6 +113,8 @@ public class OutboxPublisher {
                 send(event);
                 event.setStatus(OutboxStatus.PUBLISHED);
                 event.setPublishedAt(Instant.now());
+                // An earlier failure no longer applies once the event is out
+                event.setLastError(null);
                 log.debug("Published outbox event {} ({})", event.getId(), event.getEventType());
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();

@@ -33,9 +33,11 @@ public interface OutboxRepository  extends JpaRepository<OutboxEvent,Long>{
 
     // Only FAILED events are reset, so a concurrent retry or publish can't be overwritten; returns 0 otherwise.
     // lastError is kept so the previous failure stays visible until the next attempt.
+    // Native SQL: in JPQL, Hibernate casts enum literals to a type named after the Java enum ("outboxstatus")
+    // instead of the column's outbox_status, which Postgres rejects.
     @Modifying(flushAutomatically = true, clearAutomatically = true)
-    @Query("update OutboxEvent e set e.status = com.waller.wallet_platform.model.enums.OutboxStatus.PENDING, e.attempts = 0 "
-            + "where e.id = :id and e.status = com.waller.wallet_platform.model.enums.OutboxStatus.FAILED")
+    @Query(value = "update outbox_event set status = 'PENDING', attempts = 0 where id = :id and status = 'FAILED'",
+            nativeQuery = true)
     int resetFailedToPending(@Param("id") Long id);
 
 }

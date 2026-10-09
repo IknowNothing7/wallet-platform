@@ -1,5 +1,6 @@
 package com.waller.wallet_platform.repositories;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.domain.Page;
@@ -16,5 +17,6 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
 
     Page<Account> findAll(Pageable page);
 
-    Optional<Account> findByUser(Long id);
+    // The current user's accounts; the principal's name is the user's email
+    List<Account> findByUserEmailIgnoreCaseOrderByIdAsc(String email);
 }
