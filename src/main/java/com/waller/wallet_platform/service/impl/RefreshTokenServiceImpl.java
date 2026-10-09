@@ -73,11 +73,13 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
         return new Rotation(user, issue(user));
     }
 
+    // Logout deletes instead of revoking: a later refresh with this token is then simply unknown (401),
+    // rather than looking like reuse of a rotated token and revoking every session the user has
     @Override
     @Transactional
     public void revoke(String rawToken) {
         findByRawToken(rawToken)
-                .ifPresent(token -> refreshTokenRepository.revokeIfActive(token.getId(), Instant.now()));
+                .ifPresent(token -> refreshTokenRepository.deleteIfActive(token.getId()));
     }
 
     @Override

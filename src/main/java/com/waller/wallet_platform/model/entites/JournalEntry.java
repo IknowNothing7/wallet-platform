@@ -3,6 +3,8 @@ package com.waller.wallet_platform.model.entites;
 import java.time.Instant;
 
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import com.waller.wallet_platform.model.enums.JournalEntryType;
 
@@ -34,7 +36,8 @@ public class JournalEntry {
     private Instant createdAt;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "entry_type", nullable = false)
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "entry_type", nullable = false, columnDefinition = "journal_entry_type")
     private JournalEntryType entryType;
 
     private String description;

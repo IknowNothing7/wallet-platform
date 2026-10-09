@@ -7,3 +7,9 @@ services:
       - 'POSTGRES_USER=myuser'
     ports:
       - "5432:5432"
+  kafka:
+    # Single-node KRaft broker with the image defaults: listener on localhost:9092, topics auto-created.
+    # Spring Boot's Docker Compose support detects this image and sets spring.kafka.bootstrap-servers.
+    image: 'apache/kafka:latest'
+    ports:
+      - "9092:9092"

@@ -2,9 +2,10 @@ package com.waller.wallet_platform.model.entites;
 
 import java.io.Serializable;
 import java.time.Instant;
-import java.time.OffsetDateTime;
 
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import com.waller.wallet_platform.model.enums.PostingDirection;
 
@@ -39,14 +40,16 @@ public class Posting  implements Serializable{
     private Long accountId;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "direction", nullable = false, length = 10)
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "direction", nullable = false, columnDefinition = "posting_direction")
     private PostingDirection direction;
 
     @Column(name = "amount", nullable = false)
     private Long amount;
 
-    @Column(name = "currency", nullable = false, length = 3, columnDefinition = "char(3)")
-    private char currency;
+    @JdbcTypeCode(SqlTypes.CHAR)
+    @Column(name = "currency", nullable = false, length = 3)
+    private String currency;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

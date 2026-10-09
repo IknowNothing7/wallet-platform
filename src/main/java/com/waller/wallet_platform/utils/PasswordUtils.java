@@ -7,6 +7,9 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor 
 public final class PasswordUtils {
 
+    public static final String INVALID_PASSWORD_MESSAGE =
+            "Password must be at least 8 characters and contain upper and lower case letters, a digit and a special character";
+
     public static boolean isNotValidPassword(String password) {
         if (password == null || password.isEmpty() || password.trim().isEmpty()) {
             return true;
