@@ -3,7 +3,9 @@ package com.waller.wallet_platform.model.entites;
 import java.time.Instant;
 
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
 
 import com.waller.wallet_platform.model.enums.TransferStatus;
 
@@ -42,12 +44,14 @@ public class Transfer {
     @Column(nullable = false)
     private long amount;
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(nullable = false, length = 3)
-    private char currency;
+    private String currency;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false)
-    private TransferStatus status;
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "status", nullable = false, columnDefinition = "transfer_status")
+    private TransferStatus status = TransferStatus.PENDING;
 
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "journal_entry_id")

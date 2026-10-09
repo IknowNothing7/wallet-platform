@@ -69,7 +69,7 @@ public class OutboxEvent implements Serializable {
 
     @Enumerated(EnumType.STRING)
     @JdbcTypeCode(SqlTypes.NAMED_ENUM)
-    @Column(name = "status", nullable = false)
+    @Column(name = "status", nullable = false, columnDefinition = "outbox_status")
     private OutboxStatus status = OutboxStatus.PENDING;
 
     @Column(name = "attempts", nullable = false)

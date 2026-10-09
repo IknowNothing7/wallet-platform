@@ -14,8 +14,10 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
+import java.time.Instant;
 import java.util.Date;
 import java.util.List;
+import java.util.UUID;
 
 
 @Component
@@ -31,6 +33,7 @@ public class JwtTokenProvider {
 
     public String generateToken(AppUser user) {
         return Jwts.builder()
+                .id(UUID.randomUUID().toString())
                 .subject(user.getEmail())
                 .claim(AuthenticationConstants.USER_ID, user.getId())
                 .claim(AuthenticationConstants.USERNAME, user.getName())
@@ -43,6 +46,15 @@ public class JwtTokenProvider {
 
     public String extractEmail(String token) {
         return parseClaims(token).getSubject();
+    }
+
+    public String getTokenId(String token) {
+        return parseClaims(token).getId();
+    }
+
+    public Instant getExpiration(String token) {
+        Date expiration = parseClaims(token).getExpiration();
+        return expiration == null ? null : expiration.toInstant();
     }
 
     public boolean isTokenValid(String token) {

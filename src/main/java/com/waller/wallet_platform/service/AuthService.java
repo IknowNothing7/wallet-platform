@@ -10,6 +10,7 @@ public interface AuthService {
     ApiResponse<AuthResponse> login(LoginRequest request);
     ApiResponse<AuthResponse> refreshAccessToken(String token);
     ApiResponse<AuthResponse> registerUser(RegistrationRequest request);
-    void logout(String refreshToken);
+    /** Revokes the refresh token and, if given, the access token sent with the request. */
+    void logout(String refreshToken, String accessToken);
 
 }

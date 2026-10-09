@@ -23,4 +23,12 @@ public class ApiResponse<P extends Serializable> implements Serializable {
         return new ApiResponse<>("", payload, true);
     }
 
+    public static <P extends Serializable> ApiResponse<P> error(String message) {
+        return error(message, null);
+    }
+
+    public static <P extends Serializable> ApiResponse<P> error(String message, P payload) {
+        return new ApiResponse<>(message, payload, false);
+    }
+
 }

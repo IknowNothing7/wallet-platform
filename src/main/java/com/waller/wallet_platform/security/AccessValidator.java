@@ -7,6 +7,7 @@ import com.waller.wallet_platform.exception.InvalidDataException;
 import com.waller.wallet_platform.model.enums.ApiLogErrors;
 import com.waller.wallet_platform.repositories.AppUserRepository;
 import com.waller.wallet_platform.utils.ApiUtils;
+import com.waller.wallet_platform.utils.EmailUtils;
 import com.waller.wallet_platform.utils.PasswordUtils;
 
 import lombok.RequiredArgsConstructor;
@@ -23,7 +24,7 @@ public class AccessValidator {
         if (userRepository.existsByName(username)) {
             throw new DataExistException(ApiLogErrors.USER_ALREADY_EXIST.getMessage(username));
         }
-        userRepository.findByEmail(email).ifPresent(existingEmail -> {
+        userRepository.findByEmailIgnoreCase(EmailUtils.normalize(email)).ifPresent(existingEmail -> {
             throw new DataExistException(ApiLogErrors.EMAIL_ALREADY_EXIST.getMessage(email));
         });
 

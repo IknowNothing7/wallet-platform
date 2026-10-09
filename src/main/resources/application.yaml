@@ -10,6 +10,48 @@ spring:
     hibernate:
       ddl-auto: validate
 
+  kafka:
+    # Overridden automatically by Docker Compose support in development
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+        # Fail fast when the broker is unreachable so the outbox publisher can back off instead of hanging
+        max.block.ms: 10000
+        request.timeout.ms: 10000
+        delivery.timeout.ms: 30000
+
+  task:
+    scheduling:
+      pool:
+        # The outbox publisher can block on Kafka; keep other scheduled jobs (token cleanup etc.) running
+        size: 4
+
+app:
+  cors:
+    # Comma-separated exact origins; set CORS_ALLOWED_ORIGINS to your real frontend domains
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+
+auth:
+  rate-limit:
+    ip:
+      max-requests: 20   # POSTs to /api/auth/** per client IP per window
+      window: PT1M
+    login:
+      max-failures: 5    # failed logins per email before it is temporarily blocked
+      window: PT15M
+
+outbox:
+  publisher:
+    topic-prefix: wallet.   # events go to wallet.<aggregate_type>, e.g. wallet.transfer
+    poll-interval: PT1S
+    batch-size: 100
+    max-attempts: 10        # non-connectivity failures before an event is marked FAILED
+    send-timeout: PT35S     # must exceed delivery.timeout.ms
+    initial-backoff: PT1S   # doubles per consecutive failed batch...
+    max-backoff: PT5M       # ...up to this
+
 logging:
   level:
     org.flywaydb: DEBUG

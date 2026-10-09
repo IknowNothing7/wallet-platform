@@ -52,12 +52,13 @@ public class Hold implements Serializable {
     @Column(nullable = false)
     private long amount;
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(nullable = false, length = 3)
-    private char currency;
+    private String currency;
 
     @Enumerated(EnumType.STRING)
     @JdbcTypeCode(SqlTypes.NAMED_ENUM)
-    @Column(name = "status", nullable = false)
+    @Column(name = "status", nullable = false, columnDefinition = "hold_status")
     private HoldStatus status = HoldStatus.ACTIVE;
 
     @Column(name = "expires_at", nullable = false)
