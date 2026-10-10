@@ -27,22 +27,22 @@ public class JournalEntryController {
     private final JournalEntryService journalEntryService;
 
     @GetMapping("/{id}")
-    public ApiResponse<JournalEntryDto> getJournalEntry(@PathVariable Long id) {
+    public ApiResponse<JournalEntryDto> getJournalEntry(@PathVariable("id") Long id) {
         return ApiResponse.ok(journalEntryService.getJournalEntry(id));
     }
 
     @GetMapping
     public ApiResponse<PageResponse<JournalEntryDto>> getJournalEntries(
-            @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+            @RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
+            @RequestParam(name = "size", defaultValue = "20") @Min(1) @Max(100) int size) {
         return ApiResponse.ok(journalEntryService.getJournalEntries(page, size));
     }
 
     // e.g. /journal-entry/reference?type=transfer&id=42
     @GetMapping("/reference")
     public ApiResponse<ArrayList<JournalEntryDto>> getJournalEntriesByReference(
-            @RequestParam String type,
-            @RequestParam Long id) {
+            @RequestParam("type") String type,
+            @RequestParam("id") Long id) {
         return ApiResponse.ok(new ArrayList<>(journalEntryService.getJournalEntriesByReference(type, id)));
     }
 

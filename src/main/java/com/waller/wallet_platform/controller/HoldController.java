@@ -23,15 +23,15 @@ public class HoldController {
     private final HoldService holdService;
 
     @GetMapping("/{id}")
-    public ApiResponse<HoldDto> getHold(@PathVariable Long id) {
+    public ApiResponse<HoldDto> getHold(@PathVariable("id") Long id) {
         return ApiResponse.ok(holdService.getHold(id));
     }
 
     @GetMapping("/account/{accountId}")
     public ApiResponse<PageResponse<HoldDto>> getAccountHolds(
-            @PathVariable Long accountId,
-            @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+            @PathVariable("accountId") Long accountId,
+            @RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
+            @RequestParam(name = "size", defaultValue = "20") @Min(1) @Max(100) int size) {
         return ApiResponse.ok(holdService.getAccountHolds(accountId, page, size));
     }
 
