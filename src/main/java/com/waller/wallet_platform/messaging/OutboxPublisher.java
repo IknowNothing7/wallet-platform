@@ -23,25 +23,6 @@ import com.waller.wallet_platform.repositories.OutboxRepository;
 
 import lombok.extern.slf4j.Slf4j;
 
-/**
- * Sends PENDING outbox events to Kafka, oldest first, and marks them PUBLISHED.
- *
- * <p>Delivery is at-least-once: if the database commit fails after Kafka acknowledged a send, the event is
- * sent again on the next poll, so consumers should de-duplicate on the {@code event-id} header.
- * Events go to topic {@code <topic-prefix><aggregateType>} keyed by aggregate id, so one aggregate's events
- * stay in order on one partition (with a single publishing instance; several instances stay safe but may
- * interleave an aggregate's events across batches).
- *
- * <p>Failures are handled by kind:
- * <ul>
- * <li>broker unreachable / timeouts: the batch stops, the publisher backs off, and the event's attempts are
- * not counted, so an outage doesn't use up events' attempts;</li>
- * <li>errors that can never succeed (record too large, invalid topic, serialization): the event is marked
- * FAILED at once and the batch continues;</li>
- * <li>anything else: the attempt is counted and the batch stops to keep order; after max-attempts the event
- * is marked FAILED. Admins can retry FAILED events via POST /outbox/{id}/retry.</li>
- * </ul>
- */
 @Component
 @Slf4j
 public class OutboxPublisher {
@@ -113,6 +94,7 @@ public class OutboxPublisher {
                 send(event);
                 event.setStatus(OutboxStatus.PUBLISHED);
                 event.setPublishedAt(Instant.now());
+                event.setLastError(null);
                 log.debug("Published outbox event {} ({})", event.getId(), event.getEventType());
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();

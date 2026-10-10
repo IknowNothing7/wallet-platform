@@ -55,3 +55,9 @@ outbox:
 logging:
   level:
     org.flywaydb: DEBUG
+
+jwt:  
+
+
+secret: "PJiz4ERh9SMC_OKIn8kmYJemWw4Bmiv2zyeadNR3vEOP7mNNTiEDo4fHJLQTPUSSLE_2QL_j2uPTeXQ8uh29dQ"
+lifetime: 3600000
