@@ -2,6 +2,7 @@ package com.waller.wallet_platform.model.request;
 
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -12,6 +13,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 @AllArgsConstructor
 @Getter
 @Setter
+@Builder
 public class OutboxEventRequest  implements Serializable {
 
     @NotNull(message = "aggregateType can not be null")
@@ -24,5 +26,5 @@ public class OutboxEventRequest  implements Serializable {
     private String eventType;
 
     @NotNull(message = "payload can not be null")
-    private JsonNode payload;
+    private String payload;
 }

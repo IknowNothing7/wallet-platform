@@ -64,7 +64,10 @@ public class OutboxEventServiceImpl implements OutboxEventService {
     }
 
     @Override
+    @Transactional
     public OutboxEventDto createEvent(OutboxEventRequest request) {
+        OutboxEvent event = outboxEventMapper.requestToEntity(request);
+        outboxRepository.saveAndFlush(event);
         return null;
     }
 

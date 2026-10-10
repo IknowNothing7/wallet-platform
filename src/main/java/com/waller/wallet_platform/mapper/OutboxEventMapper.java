@@ -1,5 +1,6 @@
 package com.waller.wallet_platform.mapper;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.waller.wallet_platform.model.request.OutboxEventRequest;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;

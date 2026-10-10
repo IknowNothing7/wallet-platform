@@ -1,5 +1,6 @@
 package com.waller.wallet_platform.controller;
 
+import com.waller.wallet_platform.model.request.OutboxEventRequest;
 import com.waller.wallet_platform.model.request.TransferRequest;
 import com.waller.wallet_platform.service.OutboxEventService;
 import jakarta.validation.Valid;
@@ -40,6 +41,13 @@ public class TransferController {
     @PostMapping("/create")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<TransferDto> createTransfer( @Valid @RequestBody TransferRequest request) {
+        OutboxEventRequest eventRequest = OutboxEventRequest.builder()
+                .eventType("New transfer created")
+                .aggregateType("transfer")
+                .payload(request.toString())
+                .aggregateId(1L)
+                .build();
+        outboxEventService.createEvent(eventRequest);
         return ApiResponse.ok(transferService.createTransfer(request));
     }
 

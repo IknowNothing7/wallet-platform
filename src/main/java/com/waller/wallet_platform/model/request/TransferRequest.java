@@ -24,4 +24,13 @@ public class TransferRequest implements Serializable {
     @Pattern(regexp = "[A-Z]{3}", message = "currency must be a 3-letter ISO code")
     private String currency;
 
+    @Override
+    public String toString() {
+        return "TransferRequest{" +
+                "idFromAccount=" + idFromAccount +
+                ", idToAccount=" + idToAccount +
+                ", amount=" + amount +
+                ", currency='" + currency + '\'' +
+                '}';
+    }
 }
