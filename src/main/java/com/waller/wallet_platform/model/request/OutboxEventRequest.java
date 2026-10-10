@@ -4,9 +4,10 @@ import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.Setter;
-import tools.jackson.databind.JsonNode;
 
 import java.io.Serializable;
+
+import com.fasterxml.jackson.databind.JsonNode;
 
 @AllArgsConstructor
 @Getter
@@ -23,5 +24,5 @@ public class OutboxEventRequest  implements Serializable {
     private String eventType;
 
     @NotNull(message = "payload can not be null")
-    private String payload;
+    private JsonNode payload;
 }
