@@ -20,6 +20,8 @@ public interface AppUserRepository extends JpaRepository<AppUser, Long> {
 
     boolean existsByEmailIgnoreCase(String email);
 
+    boolean existsByEmail(String email);
+
     boolean existsByName(String name);
 
     Page<AppUser> findAll(Pageable page);     
