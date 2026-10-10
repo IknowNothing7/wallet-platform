@@ -52,6 +52,7 @@ class OutboxPublisherTest {
     @Test
     void publishesToAggregateTopicKeyedByAggregateIdAndMarksPublished() {
         OutboxEvent event = event(1L);
+         event.setLastError("earlier failure");
         when(repository.lockPendingBatch(anyInt())).thenReturn(List.of(event));
         when(kafkaTemplate.send(any(ProducerRecord.class))).thenReturn(succeeded());
 
@@ -59,6 +60,7 @@ class OutboxPublisherTest {
 
         assertThat(event.getStatus()).isEqualTo(OutboxStatus.PUBLISHED);
         assertThat(event.getPublishedAt()).isNotNull();
+                assertThat(event.getLastError()).isNull();
         verify(kafkaTemplate).send(org.mockito.ArgumentMatchers.<ProducerRecord<String, String>>argThat(record ->
                 record.topic().equals("wallet.transfer")
                         && record.key().equals("42")
