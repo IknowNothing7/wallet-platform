@@ -1,10 +1,10 @@
 package com.waller.wallet_platform.controller;
 
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import com.waller.wallet_platform.model.request.TransferRequest;
+import com.waller.wallet_platform.service.OutboxEventService;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.*;
 
 import com.waller.wallet_platform.model.dto.TransferDto;
 import com.waller.wallet_platform.model.response.ApiResponse;
@@ -21,6 +21,8 @@ import lombok.RequiredArgsConstructor;
 public class TransferController {
 
     private final TransferService transferService;
+    private final OutboxEventService outboxEventService;
+
 
     @GetMapping("/{id}")
     public ApiResponse<TransferDto> getTransfer(@PathVariable("id") Long id) {
@@ -33,6 +35,12 @@ public class TransferController {
             @RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
             @RequestParam(name = "size", defaultValue = "20") @Min(1) @Max(100) int size) {
         return ApiResponse.ok(transferService.getAccountTransfers(accountId, page, size));
+    }
+
+    @PostMapping("/create")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<TransferDto> createTransfer( @Valid @RequestBody TransferRequest request) {
+        return ApiResponse.ok(transferService.createTransfer(request));
     }
 
 }

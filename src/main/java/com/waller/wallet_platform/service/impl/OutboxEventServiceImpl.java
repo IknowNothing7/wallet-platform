@@ -1,5 +1,6 @@
 package com.waller.wallet_platform.service.impl;
 
+import com.waller.wallet_platform.model.request.OutboxEventRequest;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
@@ -60,6 +61,11 @@ public class OutboxEventServiceImpl implements OutboxEventService {
                         ? outboxRepository.findAllByOrderByCreatedAtDescIdDesc(pageable)
                         : outboxRepository.findByStatusOrderByCreatedAtDescIdDesc(status, pageable),
                 outboxEventMapper::toDto);
+    }
+
+    @Override
+    public OutboxEventDto createEvent(OutboxEventRequest request) {
+        return null;
     }
 
 }

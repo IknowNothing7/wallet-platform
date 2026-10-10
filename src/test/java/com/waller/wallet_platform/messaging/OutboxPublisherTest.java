@@ -38,7 +38,7 @@ class OutboxPublisherTest {
     private OutboxPublisher publisher;
 
     @BeforeEach
-    @SuppressWarnings("unchecked")
+//    @SuppressWarnings("unchecked")
     void setUp() {
         repository = mock(OutboxRepository.class);
         kafkaTemplate = mock(KafkaTemplate.class);
