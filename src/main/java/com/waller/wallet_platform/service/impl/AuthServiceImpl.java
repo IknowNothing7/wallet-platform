@@ -76,8 +76,9 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public ApiResponse<AuthResponse> login(LoginRequest request) {
         String email = EmailUtils.normalize(request.getEmail());
-        // Applies to unknown emails too, so it doesn't reveal which accounts exist
-        if (failedLogins.isLimited(email)) {
+        // Counted before the password check, so concurrent guesses can't all slip past the limit;
+        // a successful login resets it below. Applies to unknown emails too, so it doesn't reveal which accounts exist
+        if (!failedLogins.tryAcquire(email)) {
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, TOO_MANY_FAILED_LOGINS);
         }
 
@@ -86,7 +87,6 @@ public class AuthServiceImpl implements AuthService {
         String passwordHash = found.map(AppUser::getPasswordHash).orElse(dummyPasswordHash);
         boolean passwordMatches = passwordEncoder.matches(request.getPassword(), passwordHash);
         if (found.isEmpty() || !passwordMatches) {
-            failedLogins.record(email);
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, INVALID_CREDENTIALS);
         }
         failedLogins.reset(email);
