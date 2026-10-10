@@ -1,8 +1,5 @@
 package com.waller.wallet_platform.controller;
 
-import com.waller.wallet_platform.model.request.OutboxEventRequest;
-import com.waller.wallet_platform.service.OutboxEventService;
-import com.waller.wallet_platform.service.impl.OutboxEventServiceImpl;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -30,18 +27,10 @@ import lombok.RequiredArgsConstructor;
 public class DepositController {
 
     private final DepositService depositService;
-    private final OutboxEventService outboxEventService;
 
     @PostMapping("/create")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<DepositDto> createDeposit(@Valid @RequestBody DepositRequest request) {
-        OutboxEventRequest eventRequest = OutboxEventRequest.builder()
-                .eventType("New deposit was created")
-                .aggregateType("deposit")
-                .payload(request.toString())
-                .aggregateId(2L)
-                .build();
-        outboxEventService.createEvent(eventRequest);
         return ApiResponse.ok(depositService.createDeposit(request));
     }
 

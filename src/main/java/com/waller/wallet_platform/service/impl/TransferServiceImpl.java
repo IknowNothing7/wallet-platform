@@ -16,6 +16,7 @@ import com.waller.wallet_platform.model.entites.Transfer;
 import com.waller.wallet_platform.model.response.PageResponse;
 import com.waller.wallet_platform.repositories.TransferRepository;
 import com.waller.wallet_platform.security.AccountAccessChecker;
+import com.waller.wallet_platform.service.OutboxEventService;
 import com.waller.wallet_platform.service.TransferService;
 
 import lombok.RequiredArgsConstructor;
@@ -27,11 +28,14 @@ public class TransferServiceImpl implements TransferService {
 
     private static final String TRANSFER_NOT_FOUND = "Transfer not found";
     private static final String ACCOUNT_NOT_FOUND = "Account not found";
+    private static final String AGGREGATE_TYPE = "transfer";
+    private static final String TRANSFER_CREATED = "TransferCreated";
 
     private final TransferRepository transferRepository;
     private final TransferMapper transferMapper;
     private final AccountAccessChecker accountAccessChecker;
     private final AccountRepository accountRepository;
+    private final OutboxEventService outboxEventService;
 
 
     @Override
@@ -66,7 +70,9 @@ public class TransferServiceImpl implements TransferService {
         transfer.setToAccount(accountTo);
         log.info("Transfer {} created for account {}", transfer.getId(), accountFrom.getId());
 
-        return transferMapper.toDto(transfer);
+        TransferDto dto = transferMapper.toDto(transfer);
+        outboxEventService.record(AGGREGATE_TYPE, transfer.getId(), TRANSFER_CREATED, dto);
+        return dto;
 
     }
 
