@@ -2,6 +2,7 @@ package com.waller.wallet_platform.exception;
 
 import java.util.LinkedHashMap;
 
+import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
@@ -11,6 +12,8 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -48,9 +51,23 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<?>> handleParameterValidation(HandlerMethodValidationException e) {
         LinkedHashMap<String, String> parameterErrors = new LinkedHashMap<>();
         e.getParameterValidationResults().forEach(result -> parameterErrors.putIfAbsent(
-                result.getMethodParameter().getParameterName(),
+                parameterName(result.getMethodParameter()),
                 result.getResolvableErrors().getFirst().getDefaultMessage()));
         return build(HttpStatus.BAD_REQUEST, ApiResponse.error(VALIDATION_FAILED, parameterErrors));
+    }
+
+    // Prefers the annotation's name: reflection names are null when compiled without -parameters (e.g. VS Code's compiler)
+    private static String parameterName(MethodParameter parameter) {
+        RequestParam requestParam = parameter.getParameterAnnotation(RequestParam.class);
+        if (requestParam != null && !requestParam.name().isEmpty()) {
+            return requestParam.name();
+        }
+        PathVariable pathVariable = parameter.getParameterAnnotation(PathVariable.class);
+        if (pathVariable != null && !pathVariable.name().isEmpty()) {
+            return pathVariable.name();
+        }
+        String name = parameter.getParameterName();
+        return name != null ? name : "arg" + parameter.getParameterIndex();
     }
 
     // e.g. /posting/abc where a number is expected

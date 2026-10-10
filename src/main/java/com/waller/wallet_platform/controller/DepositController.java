@@ -35,15 +35,15 @@ public class DepositController {
     }
 
     @GetMapping("/{id}")
-    public ApiResponse<DepositDto> getDeposit(@PathVariable Long id) {
+    public ApiResponse<DepositDto> getDeposit(@PathVariable("id") Long id) {
         return ApiResponse.ok(depositService.getDeposit(id));
     }
 
     @GetMapping("/account/{accountId}")
     public ApiResponse<PageResponse<DepositDto>> getAccountDeposits(
-            @PathVariable Long accountId,
-            @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+            @PathVariable("accountId") Long accountId,
+            @RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
+            @RequestParam(name = "size", defaultValue = "20") @Min(1) @Max(100) int size) {
         return ApiResponse.ok(depositService.getAccountDeposits(accountId, page, size));
     }
 

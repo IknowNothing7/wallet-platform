@@ -39,7 +39,7 @@ public class AccountController {
     }
 
     @GetMapping("/{id}")
-    public ApiResponse<AccountDto> getAccount(@PathVariable Long id) {
+    public ApiResponse<AccountDto> getAccount(@PathVariable("id") Long id) {
         return ApiResponse.ok(accountService.getAccount(id));
     }
 

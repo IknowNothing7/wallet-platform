@@ -27,22 +27,22 @@ public class OutboxEventController {
     private final OutboxEventService outboxEventService;
 
     @GetMapping("/{id}")
-    public ApiResponse<OutboxEventDto> getEvent(@PathVariable Long id) {
+    public ApiResponse<OutboxEventDto> getEvent(@PathVariable("id") Long id) {
         return ApiResponse.ok(outboxEventService.getEvent(id));
     }
 
     // 409 if the event isn't FAILED
     @PostMapping("/{id}/retry")
-    public ApiResponse<OutboxEventDto> retryEvent(@PathVariable Long id) {
+    public ApiResponse<OutboxEventDto> retryEvent(@PathVariable("id") Long id) {
         return ApiResponse.ok(outboxEventService.retryEvent(id));
     }
 
     // e.g. /outbox?status=FAILED
     @GetMapping
     public ApiResponse<PageResponse<OutboxEventDto>> getEvents(
-            @RequestParam(required = false) OutboxStatus status,
-            @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+            @RequestParam(name = "status", required = false) OutboxStatus status,
+            @RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
+            @RequestParam(name = "size", defaultValue = "20") @Min(1) @Max(100) int size) {
         return ApiResponse.ok(outboxEventService.getEvents(status, page, size));
     }
 

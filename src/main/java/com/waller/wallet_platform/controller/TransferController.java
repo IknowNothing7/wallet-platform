@@ -23,15 +23,15 @@ public class TransferController {
     private final TransferService transferService;
 
     @GetMapping("/{id}")
-    public ApiResponse<TransferDto> getTransfer(@PathVariable Long id) {
+    public ApiResponse<TransferDto> getTransfer(@PathVariable("id") Long id) {
         return ApiResponse.ok(transferService.getTransfer(id));
     }
 
     @GetMapping("/account/{accountId}")
     public ApiResponse<PageResponse<TransferDto>> getAccountTransfers(
-            @PathVariable Long accountId,
-            @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+            @PathVariable("accountId") Long accountId,
+            @RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
+            @RequestParam(name = "size", defaultValue = "20") @Min(1) @Max(100) int size) {
         return ApiResponse.ok(transferService.getAccountTransfers(accountId, page, size));
     }
 
