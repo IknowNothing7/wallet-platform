@@ -15,8 +15,8 @@ import com.waller.wallet_platform.repositories.AccountRepository;
 import com.waller.wallet_platform.model.response.PageResponse;
 import com.waller.wallet_platform.repositories.DepositRepository;
 import com.waller.wallet_platform.security.AccountAccessChecker;
-
 import com.waller.wallet_platform.service.DepositService;
+import com.waller.wallet_platform.service.OutboxEventService;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -30,9 +30,12 @@ public class DepositServiceImpl implements DepositService {
     private final AccountRepository accountRepository;
     private static final String DEPOSIT_NOT_FOUND = "Deposit not found";
     private static final String ACCOUNT_NOT_FOUND = "Account not found";
+    private static final String AGGREGATE_TYPE = "deposit";
+    private static final String DEPOSIT_CREATED = "DepositCreated";
 
     private final DepositMapper depositMapper;
     private final AccountAccessChecker accountAccessChecker;
+    private final OutboxEventService outboxEventService;
 
     @Override
     @Transactional
@@ -51,7 +54,9 @@ public class DepositServiceImpl implements DepositService {
         Deposit saved = depositRepository.save(deposit);
         log.info("Deposit {} created for account {}", saved.getId(), account.getId());
 
-        return depositMapper.toDto(saved);
+        DepositDto dto = depositMapper.toDto(saved);
+        outboxEventService.record(AGGREGATE_TYPE, saved.getId(), DEPOSIT_CREATED, dto);
+        return dto;
     }
 
     @Override

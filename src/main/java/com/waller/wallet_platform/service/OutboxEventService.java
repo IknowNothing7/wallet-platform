@@ -15,4 +15,10 @@ public interface OutboxEventService {
     /** Newest first; all statuses when {@code status} is null. */
     PageResponse<OutboxEventDto> getEvents(OutboxStatus status, int page, int size);
 
+    /**
+     * Stores a PENDING event for the publisher. Must run inside the caller's transaction,
+     * so the event is committed together with the change it describes, or not at all.
+     */
+    void record(String aggregateType, Long aggregateId, String eventType, Object payload);
+
 }

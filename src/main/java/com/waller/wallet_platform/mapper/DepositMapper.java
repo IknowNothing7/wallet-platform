@@ -10,7 +10,6 @@ import com.waller.wallet_platform.model.request.DepositRequest;
 @Mapper(componentModel = "spring")
 public interface DepositMapper {
 
-    // account is resolved by the service; status keeps the entity default (PENDING)
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
