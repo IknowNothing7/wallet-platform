@@ -11,11 +11,14 @@ import org.springframework.web.server.ResponseStatusException;
 import com.waller.wallet_platform.mapper.JournalEntryMapper;
 import com.waller.wallet_platform.mapper.PostingMapper;
 import com.waller.wallet_platform.model.dto.JournalEntryDto;
+import com.waller.wallet_platform.model.dto.PostingDto;
 import com.waller.wallet_platform.model.entites.JournalEntry;
+import com.waller.wallet_platform.model.request.JournalEntryRequest;
 import com.waller.wallet_platform.model.response.PageResponse;
 import com.waller.wallet_platform.repositories.JournalEntryRepository;
 import com.waller.wallet_platform.repositories.PostingRepository;
 import com.waller.wallet_platform.service.JournalEntryService;
+import com.waller.wallet_platform.service.PostingService;
 
 import lombok.RequiredArgsConstructor;
 
@@ -30,6 +33,22 @@ public class JournalEntryServiceImpl implements JournalEntryService {
     private final PostingRepository postingRepository;
     private final JournalEntryMapper journalEntryMapper;
     private final PostingMapper postingMapper;
+    private final PostingService postingService;
+
+    @Override
+    @Transactional
+    public JournalEntryDto createJournalEntry(JournalEntryRequest request) {
+        JournalEntry entry = new JournalEntry();
+        entry.setEntryType(request.getEntryType());
+        entry.setDescription(request.getDescription());
+        entry.setReferenceType(request.getReferenceType());
+        entry.setReferenceId(request.getReferenceId());
+        JournalEntry saved = journalEntryRepository.save(entry);
+
+        // Throws on an unbalanced set, rolling back the entry with it
+        List<PostingDto> postings = postingService.createPostings(saved.getId(), request.getPostings());
+        return journalEntryMapper.toDto(saved, postings);
+    }
 
     @Override
     @Transactional(readOnly = true)

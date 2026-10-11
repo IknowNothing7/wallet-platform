@@ -1,6 +1,8 @@
 package com.waller.wallet_platform.service.impl;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
@@ -10,8 +12,13 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.waller.wallet_platform.mapper.PostingMapper;
 import com.waller.wallet_platform.model.dto.PostingDto;
+import com.waller.wallet_platform.model.entites.Account;
 import com.waller.wallet_platform.model.entites.Posting;
+import com.waller.wallet_platform.model.enums.PostingDirection;
+import com.waller.wallet_platform.model.request.PostingRequest;
 import com.waller.wallet_platform.model.response.PageResponse;
+import com.waller.wallet_platform.repositories.AccountRepository;
+import com.waller.wallet_platform.repositories.JournalEntryRepository;
 import com.waller.wallet_platform.repositories.PostingRepository;
 import com.waller.wallet_platform.security.AccountAccessChecker;
 import com.waller.wallet_platform.service.PostingService;
@@ -24,10 +31,43 @@ public class PostingServiceImpl implements PostingService {
 
     private static final String POSTING_NOT_FOUND = "Posting not found";
     private static final String ACCOUNT_NOT_FOUND = "Account not found";
+    private static final String JOURNAL_ENTRY_NOT_FOUND = "Journal entry not found";
 
     private final PostingRepository postingRepository;
+    private final JournalEntryRepository journalEntryRepository;
+    private final AccountRepository accountRepository;
     private final PostingMapper postingMapper;
     private final AccountAccessChecker accountAccessChecker;
+
+    // Admin-only (enforced in the controller); joins the caller's transaction when called from JournalEntryService
+    @Override
+    @Transactional
+    public List<PostingDto> createPostings(Long journalEntryId, List<PostingRequest> requests) {
+        if (!journalEntryRepository.existsById(journalEntryId)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, JOURNAL_ENTRY_NOT_FOUND);
+        }
+        requireBalanced(requests);
+
+        List<Posting> postings = requests.stream().map(r -> {
+            Account account = accountRepository.findById(r.getAccountId())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                            "Account " + r.getAccountId() + " not found"));
+            if (!account.getCurrency().equals(r.getCurrency())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Posting currency does not match account " + account.getId() + " currency");
+            }
+            Posting posting = new Posting();
+            posting.setJournalEntryId(journalEntryId);
+            posting.setAccountId(account.getId());
+            posting.setDirection(r.getDirection());
+            posting.setAmount(r.getAmount());
+            posting.setCurrency(r.getCurrency());
+            return posting;
+        }).toList();
+        // TODO: apply postings to account balances
+
+        return postingMapper.toDtos(postingRepository.saveAll(postings));
+    }
 
     @Override
     @Transactional(readOnly = true)
@@ -57,6 +97,21 @@ public class PostingServiceImpl implements PostingService {
     @Transactional(readOnly = true)
     public List<PostingDto> getJournalEntryPostings(Long journalEntryId) {
         return postingMapper.toDtos(postingRepository.findByJournalEntryIdOrderByIdAsc(journalEntryId));
+    }
+
+    // Debits must equal credits within every currency, or the ledger drifts
+    private void requireBalanced(List<PostingRequest> requests) {
+        if (requests == null || requests.size() < 2) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "At least two postings are required");
+        }
+        Map<String, Long> net = new HashMap<>();
+        for (PostingRequest r : requests) {
+            long signed = r.getDirection() == PostingDirection.DEBIT ? r.getAmount() : -r.getAmount();
+            net.merge(r.getCurrency(), signed, Math::addExact);
+        }
+        if (net.values().stream().anyMatch(v -> v != 0)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Postings are not balanced");
+        }
     }
 
 }

@@ -3,18 +3,24 @@ package com.waller.wallet_platform.controller;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.waller.wallet_platform.model.dto.PostingDto;
+import com.waller.wallet_platform.model.request.PostingRequest;
 import com.waller.wallet_platform.model.response.ApiResponse;
 import com.waller.wallet_platform.model.response.PageResponse;
 import com.waller.wallet_platform.service.PostingService;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +31,16 @@ import lombok.RequiredArgsConstructor;
 public class PostingController {
 
     private final PostingService postingService;
+
+    // Adds a balanced set of postings (debits == credits) to an existing journal entry
+    @PostMapping("/journal-entry/{journalEntryId}")
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<ArrayList<PostingDto>> createPostings(
+            @PathVariable("journalEntryId") Long journalEntryId,
+            @RequestBody List<@Valid PostingRequest> requests) {
+        return ApiResponse.ok(new ArrayList<>(postingService.createPostings(journalEntryId, requests)));
+    }
 
     @GetMapping("/{id}")
     public ApiResponse<PostingDto> getPosting(@PathVariable("id") Long id) {

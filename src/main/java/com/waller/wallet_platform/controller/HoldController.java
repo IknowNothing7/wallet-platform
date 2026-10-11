@@ -1,16 +1,23 @@
 package com.waller.wallet_platform.controller;
 
+import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.waller.wallet_platform.model.dto.HoldDto;
+import com.waller.wallet_platform.model.request.HoldRequest;
 import com.waller.wallet_platform.model.response.ApiResponse;
 import com.waller.wallet_platform.model.response.PageResponse;
 import com.waller.wallet_platform.service.HoldService;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +28,14 @@ import lombok.RequiredArgsConstructor;
 public class HoldController {
 
     private final HoldService holdService;
+
+    // A merchant reserves funds on a customer's account, e.g. at checkout
+    @PostMapping("/create")
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('MERCHANT')")
+    public ApiResponse<HoldDto> createHold(@Valid @RequestBody HoldRequest request) {
+        return ApiResponse.ok(holdService.createHold(request));
+    }
 
     @GetMapping("/{id}")
     public ApiResponse<HoldDto> getHold(@PathVariable("id") Long id) {
