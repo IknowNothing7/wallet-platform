@@ -1,0 +1,47 @@
+package com.waller.wallet_platform.outbox.controller;
+
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import com.waller.wallet_platform.common.web.ApiResponse;
+import com.waller.wallet_platform.common.web.PageResponse;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import lombok.RequiredArgsConstructor;
+import com.waller.wallet_platform.outbox.dto.OutboxEventDto;
+import com.waller.wallet_platform.outbox.service.OutboxEventService;
+import com.waller.wallet_platform.outbox.entity.OutboxStatus;
+
+@RestController
+@RequiredArgsConstructor
+@RequestMapping("/outbox")
+@PreAuthorize("hasRole('ADMIN')")
+public class OutboxEventController {
+
+    private final OutboxEventService outboxEventService;
+
+    @GetMapping("/{id}")
+    public ApiResponse<OutboxEventDto> getEvent(@PathVariable("id") Long id) {
+        return ApiResponse.ok(outboxEventService.getEvent(id));
+    }
+
+    // 409 if the event isn't FAILED
+    @PostMapping("/{id}/retry")
+    public ApiResponse<OutboxEventDto> retryEvent(@PathVariable("id") Long id) {
+        return ApiResponse.ok(outboxEventService.retryEvent(id));
+    }
+
+    // e.g. /outbox?status=FAILED
+    @GetMapping
+    public ApiResponse<PageResponse<OutboxEventDto>> getEvents(
+            @RequestParam(name = "status", required = false) OutboxStatus status,
+            @RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
+            @RequestParam(name = "size", defaultValue = "20") @Min(1) @Max(100) int size) {
+        return ApiResponse.ok(outboxEventService.getEvents(status, page, size));
+    }
+
+}

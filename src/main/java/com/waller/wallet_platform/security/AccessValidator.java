@@ -4,7 +4,7 @@ import org.springframework.stereotype.Component;
 import com.waller.wallet_platform.common.exception.DataExistException;
 import com.waller.wallet_platform.common.exception.InvalidDataException;
 import com.waller.wallet_platform.common.exception.ApiLogErrors;
-import com.waller.wallet_platform.user.AppUserRepository;
+import com.waller.wallet_platform.user.repository.AppUserRepository;
 import com.waller.wallet_platform.common.util.ApiUtils;
 import com.waller.wallet_platform.common.util.EmailUtils;
 import com.waller.wallet_platform.common.util.PasswordUtils;
