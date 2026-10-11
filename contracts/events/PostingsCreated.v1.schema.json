@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.wallet-platform.local/events/PostingsCreated.v1.schema.json",
+  "title": "PostingsCreated",
+  "description": "The postings of one journal entry; debits and credits per currency sum to the same amount.",
+  "x-event-type": "PostingsCreated",
+  "x-event-version": 1,
+  "x-topic": "wallet.journal_entry",
+  "x-key": "aggregate id, as a decimal string",
+  "type": "array",
+  "minItems": 2,
+  "items": {
+    "$ref": "#/$defs/posting"
+  },
+  "$defs": {
+    "posting": {
+      "type": "object",
+      "required": [
+        "id",
+        "journalEntryId",
+        "accountId",
+        "direction",
+        "amount",
+        "currency",
+        "createdAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "journalEntryId": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Id of another wallet aggregate"
+        },
+        "accountId": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Id of another wallet aggregate"
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "DEBIT",
+            "CREDIT"
+          ]
+        },
+        "amount": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Minor units (cents)"
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$",
+          "description": "ISO 4217 code"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "examples": [
+    [
+      {
+        "id": 61,
+        "journalEntryId": 31,
+        "accountId": 2,
+        "direction": "DEBIT",
+        "amount": 990,
+        "currency": "EUR",
+        "createdAt": "2026-10-11T08:49:42.695Z"
+      },
+      {
+        "id": 62,
+        "journalEntryId": 31,
+        "accountId": 12,
+        "direction": "CREDIT",
+        "amount": 990,
+        "currency": "EUR",
+        "createdAt": "2026-10-11T08:49:42.695Z"
+      }
+    ]
+  ]
+}

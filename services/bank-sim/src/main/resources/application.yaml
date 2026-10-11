@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: bank-sim
+
+server:
+  port: ${SERVER_PORT:8081}
+
+bank-sim:
+  webhook:
+    # wallet-service endpoint that receives payment results
+    url: ${BANK_SIM_WEBHOOK_URL:http://localhost:8080/webhooks/bank}
+    # Shared with wallet-service; both sides compute HMAC-SHA256 over "<timestamp>.<body>"
+    secret: ${BANK_SIM_WEBHOOK_SECRET:change-me-local-only}
+    delay: PT2S             # time between accepting a payment and sending its result
+    max-attempts: 10        # at-least-once: resend until 2xx or attempts run out
+    initial-backoff: PT1S   # doubles per failed attempt...
+    max-backoff: PT1M       # ...up to this
+    request-timeout: PT5S

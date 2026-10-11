@@ -1,1 +1,5 @@
 rootProject.name = 'wallet-platform'
+
+// The wallet service still lives at the repository root; it moves to services/wallet-service later
+include 'services:bank-sim'
+include 'services:notification-service'

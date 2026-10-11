@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.wallet-platform.local/events/AccountCreated.v1.schema.json",
+  "title": "AccountCreated",
+  "description": "A wallet account was opened.",
+  "x-event-type": "AccountCreated",
+  "x-event-version": 1,
+  "x-topic": "wallet.account",
+  "x-key": "aggregate id, as a decimal string",
+  "type": "object",
+  "required": [
+    "id",
+    "createdAt",
+    "updatedAt",
+    "balance",
+    "currency",
+    "type",
+    "status",
+    "userId"
+  ],
+  "properties": {
+    "id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "balance": {
+      "type": "integer",
+      "description": "Minor units; may be negative for SYSTEM accounts"
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "description": "ISO 4217 code"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "USER",
+        "SYSTEM"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "FROZEN",
+        "CLOSED"
+      ]
+    },
+    "userId": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "description": "Owner; null for SYSTEM accounts"
+    }
+  },
+  "additionalProperties": true,
+  "examples": [
+    {
+      "id": 7,
+      "createdAt": "2026-10-11T08:49:42.695Z",
+      "updatedAt": "2026-10-11T08:49:42.695Z",
+      "balance": 0,
+      "currency": "EUR",
+      "type": "USER",
+      "status": "ACTIVE",
+      "userId": 3
+    }
+  ]
+}

@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.wallet-platform.local/events/DepositCreated.v1.schema.json",
+  "title": "DepositCreated",
+  "description": "A top-up through a payment gateway was started; the result arrives later.",
+  "x-event-type": "DepositCreated",
+  "x-event-version": 1,
+  "x-topic": "wallet.deposit",
+  "x-key": "aggregate id, as a decimal string",
+  "type": "object",
+  "required": [
+    "id",
+    "createdAt",
+    "updatedAt",
+    "accountId",
+    "amount",
+    "currency",
+    "gateway",
+    "gatewayReference",
+    "status",
+    "failureReason",
+    "expiresAt"
+  ],
+  "properties": {
+    "id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "accountId": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Id of another wallet aggregate"
+    },
+    "amount": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Minor units (cents)"
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "description": "ISO 4217 code"
+    },
+    "gateway": {
+      "type": "string",
+      "maxLength": 50
+    },
+    "gatewayReference": {
+      "type": "string",
+      "maxLength": 255
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PENDING",
+        "SUCCEEDED",
+        "FAILED",
+        "EXPIRED"
+      ]
+    },
+    "failureReason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 255
+    },
+    "expiresAt": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": true,
+  "examples": [
+    {
+      "id": 42,
+      "createdAt": "2026-10-11T08:49:42.695Z",
+      "updatedAt": "2026-10-11T08:49:42.695Z",
+      "accountId": 7,
+      "amount": 1500,
+      "currency": "EUR",
+      "gateway": "bank-sim",
+      "gatewayReference": "bsim_d7ed31d1-152b-4e19-abc2-db8f39c650d5",
+      "status": "PENDING",
+      "failureReason": null,
+      "expiresAt": null
+    }
+  ]
+}
