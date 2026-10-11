@@ -1,5 +1,6 @@
 package com.waller.wallet_platform.hold.service;
 
+import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -13,9 +14,25 @@ import com.waller.wallet_platform.security.AccountAccessChecker;
 import lombok.RequiredArgsConstructor;
 import com.waller.wallet_platform.hold.mapper.HoldMapper;
 import com.waller.wallet_platform.hold.repository.HoldRepository;
+import com.waller.wallet_platform.hold.dto.HoldCaptureRequest;
 import com.waller.wallet_platform.hold.dto.HoldDto;
 import com.waller.wallet_platform.hold.dto.HoldRequest;
 import com.waller.wallet_platform.hold.entity.Hold;
+import com.waller.wallet_platform.ledger.dto.JournalEntryDto;
+import com.waller.wallet_platform.ledger.dto.JournalEntryRequest;
+import com.waller.wallet_platform.ledger.dto.PostingRequest;
+import com.waller.wallet_platform.ledger.entity.JournalEntryType;
+import com.waller.wallet_platform.ledger.entity.PostingDirection;
+import com.waller.wallet_platform.ledger.repository.JournalEntryRepository;
+import com.waller.wallet_platform.ledger.service.JournalEntryService;
+
+import java.time.Instant;
+import java.util.List;
+
+import static com.waller.wallet_platform.hold.entity.HoldStatus.ACTIVE;
+import static com.waller.wallet_platform.hold.entity.HoldStatus.CAPTURED;
+import static com.waller.wallet_platform.hold.entity.HoldStatus.EXPIRED;
+import static com.waller.wallet_platform.hold.entity.HoldStatus.RELEASED;
 
 @Service
 @RequiredArgsConstructor
@@ -23,17 +40,25 @@ public class HoldServiceImpl implements HoldService {
 
     private static final String HOLD_NOT_FOUND = "Hold not found";
     private static final String ACCOUNT_NOT_FOUND = "Account not found";
+    private static final String AGGREGATE_TYPE = "hold";
+    private static final String HOLD_CREATED = "HoldCreated";
+    private static final String HOLD_CAPTURED = "HoldCaptured";
+    private static final String HOLD_RELEASED = "HoldReleased";
+    private static final String HOLD_EXPIRED = "HoldExpired";
 
     private final HoldRepository holdRepository;
     private final AccountRepository accountRepository;
     private final HoldMapper holdMapper;
     private final AccountAccessChecker accountAccessChecker;
+    private final OutboxEventService outboxEventService;
+    private final JournalEntryService journalEntryService;
+    private final JournalEntryRepository journalEntryRepository;
 
     // Merchant-only (enforced in the controller): the account belongs to the customer, not the caller
     @Override
     @Transactional
     public HoldDto createHold(HoldRequest request) {
-        Account account = accountRepository.findById(request.getAccountId())
+        Account account = accountRepository.findUserAccountByIdForUpdate(request.getAccountId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, ACCOUNT_NOT_FOUND));
 
         if (account.getStatus() != AccountStatus.ACTIVE) {
@@ -44,14 +69,22 @@ public class HoldServiceImpl implements HoldService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Hold currency does not match account currency " + account.getCurrency());
         }
-        // TODO: check available balance (balance minus active holds) once balances are maintained
 
         Hold hold = new Hold();
         hold.setAccount(account);
         hold.setAmount(request.getAmount());
         hold.setCurrency(request.getCurrency());
         hold.setExpiresAt(request.getExpiresAt());
-        return holdMapper.toDto(holdRepository.save(hold));
+
+        long held = holdRepository.sumAmountByAccountIdAndStatus(account.getId(), ACTIVE, Instant.now());
+        if (account.getBalance() - held < hold.getAmount()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "There is not enough money on the account");
+        }
+
+        Hold saved = holdRepository.save(hold);
+        HoldDto dto = holdMapper.toDto(saved);
+        outboxEventService.record(AGGREGATE_TYPE, saved.getId(), HOLD_CREATED, dto);
+        return dto;
     }
 
     @Override
@@ -73,6 +106,101 @@ public class HoldServiceImpl implements HoldService {
         return PageResponse.of(
                 holdRepository.findByAccountIdOrderByCreatedAtDescIdDesc(accountId, PageRequest.of(page, size)),
                 holdMapper::toDto);
+    }
+
+    // Merchant-only (enforced in the controller). Moves the held amount to the destination account
+    // through a HOLD_CAPTURE journal entry; a repeat returns the already captured hold.
+    @Override
+    @Transactional
+    public HoldDto captureHold(Long id, HoldCaptureRequest request) {
+        Hold hold = lockHold(id);
+        if (hold.getStatus() == CAPTURED) {
+            return holdMapper.toDto(hold);
+        }
+        requireActive(hold, "captured");
+        if (!hold.getExpiresAt().isAfter(Instant.now())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Hold has expired");
+        }
+
+        Account source = hold.getAccount();
+        Account destination = accountRepository.findUserAccountById(request.getDestinationAccountId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, ACCOUNT_NOT_FOUND));
+        if (destination.getId().equals(source.getId())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Hold can not be captured to its own account");
+        }
+        if (destination.getStatus() != AccountStatus.ACTIVE) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Destination account is not active");
+        }
+        if (!destination.getCurrency().equals(hold.getCurrency())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Hold currency does not match destination account currency " + destination.getCurrency());
+        }
+
+        JournalEntryDto entry = journalEntryService.createJournalEntry(new JournalEntryRequest(
+                JournalEntryType.HOLD_CAPTURE,
+                "Capture of hold " + hold.getId(),
+                AGGREGATE_TYPE,
+                hold.getId(),
+                List.of(
+                        new PostingRequest(source.getId(), PostingDirection.DEBIT, hold.getAmount(), hold.getCurrency()),
+                        new PostingRequest(destination.getId(), PostingDirection.CREDIT, hold.getAmount(), hold.getCurrency()))));
+
+        hold.setStatus(CAPTURED);
+        hold.setCapturedEntry(journalEntryRepository.getReferenceById(entry.id()));
+        return transitioned(hold, HOLD_CAPTURED);
+    }
+
+    // Merchant-only (enforced in the controller): gives the reserved funds back, e.g. on a cancelled order
+    @Override
+    @Transactional
+    public HoldDto releaseHold(Long id) {
+        Hold hold = lockHold(id);
+        if (hold.getStatus() == RELEASED) {
+            return holdMapper.toDto(hold);
+        }
+        requireActive(hold, "released");
+
+        hold.setStatus(RELEASED);
+        hold.setReleasedAt(Instant.now());
+        return transitioned(hold, HOLD_RELEASED);
+    }
+
+    // Only once expiresAt has passed; until then the hold still reserves its funds
+    @Override
+    @Transactional
+    public HoldDto expireHold(Long id) {
+        Hold hold = lockHold(id);
+        if (hold.getStatus() == EXPIRED) {
+            return holdMapper.toDto(hold);
+        }
+        requireActive(hold, "expired");
+        if (hold.getExpiresAt().isAfter(Instant.now())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Hold has not expired yet");
+        }
+
+        hold.setStatus(EXPIRED);
+        return transitioned(hold, HOLD_EXPIRED);
+    }
+
+    // The lock serializes concurrent transitions, so the status check below can't go stale
+    private Hold lockHold(Long id) {
+        return holdRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, HOLD_NOT_FOUND));
+    }
+
+    // Any other final state means the hold went a different way; that is a conflict, not a retry
+    private void requireActive(Hold hold, String action) {
+        if (hold.getStatus() != ACTIVE) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Hold is " + hold.getStatus() + " and can not be " + action);
+        }
+    }
+
+    // Saved and flushed first so the event carries the new updatedAt
+    private HoldDto transitioned(Hold hold, String eventType) {
+        HoldDto dto = holdMapper.toDto(holdRepository.saveAndFlush(hold));
+        outboxEventService.record(AGGREGATE_TYPE, hold.getId(), eventType, dto);
+        return dto;
     }
 
 }

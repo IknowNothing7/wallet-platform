@@ -14,6 +14,7 @@ public interface AccountMapper {
 
     @Mapping(target = "user", ignore = true)
     @Mapping(target = "version", ignore = true)
+    @Mapping(target = "systemKind", ignore = true)
     Account toAccountEntity(AccountDto dto);
 
     // balance, status and type keep the entity defaults; user is resolved by the service
@@ -25,6 +26,7 @@ public interface AccountMapper {
     @Mapping(target = "status", ignore = true)
     @Mapping(target = "type", ignore = true)
     @Mapping(target = "user", ignore = true)
+    @Mapping(target = "systemKind", ignore = true)
     Account createAnAccount(AccountRequest request);
 
 }

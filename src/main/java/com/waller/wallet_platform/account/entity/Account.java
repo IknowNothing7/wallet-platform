@@ -62,8 +62,19 @@ public class Account implements Serializable {
     @Column(name = "type", nullable = false, columnDefinition = "account_type")
     private AccountType type = AccountType.USER;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "user_id", nullable = false)
+    // Null for system accounts, which belong to the platform rather than a user
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id")
     private AppUser user;
+
+    // Set only on system accounts (type SYSTEM); a DB check keeps it in step with type and user
+    @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.NAMED_ENUM)
+    @Column(name = "system_kind", columnDefinition = "system_account_kind")
+    private SystemAccountKind systemKind;
+
+    public boolean isSystem() {
+        return systemKind != null;
+    }
 
 }

@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import com.waller.wallet_platform.common.web.PageResponse;
+import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import lombok.RequiredArgsConstructor;
 import com.waller.wallet_platform.ledger.dto.JournalEntryDto;
 import com.waller.wallet_platform.ledger.dto.JournalEntryRequest;
@@ -23,12 +24,15 @@ import com.waller.wallet_platform.ledger.repository.PostingRepository;
 public class JournalEntryServiceImpl implements JournalEntryService {
 
     private static final String JOURNAL_ENTRY_NOT_FOUND = "Journal entry not found";
+    private static final String AGGREGATE_TYPE = "journal_entry";
+    private static final String JOURNAL_ENTRY_CREATED = "JournalEntryCreated";
 
     private final JournalEntryRepository journalEntryRepository;
     private final PostingRepository postingRepository;
     private final JournalEntryMapper journalEntryMapper;
     private final PostingMapper postingMapper;
     private final PostingService postingService;
+    private final OutboxEventService outboxEventService;
 
     @Override
     @Transactional
@@ -39,6 +43,9 @@ public class JournalEntryServiceImpl implements JournalEntryService {
         entry.setReferenceType(request.getReferenceType());
         entry.setReferenceId(request.getReferenceId());
         JournalEntry saved = journalEntryRepository.save(entry);
+
+        // Header only: the postings follow as their own PostingsCreated event on the same aggregate
+        outboxEventService.record(AGGREGATE_TYPE, saved.getId(), JOURNAL_ENTRY_CREATED, journalEntryMapper.toDto(saved));
 
         // Throws on an unbalanced set, rolling back the entry with it
         List<PostingDto> postings = postingService.createPostings(saved.getId(), request.getPostings());

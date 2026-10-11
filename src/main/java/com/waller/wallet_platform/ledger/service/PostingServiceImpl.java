@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import com.waller.wallet_platform.account.entity.Account;
 import com.waller.wallet_platform.common.web.PageResponse;
+import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import com.waller.wallet_platform.account.repository.AccountRepository;
 import com.waller.wallet_platform.security.AccountAccessChecker;
 import lombok.RequiredArgsConstructor;
@@ -28,12 +29,15 @@ public class PostingServiceImpl implements PostingService {
     private static final String POSTING_NOT_FOUND = "Posting not found";
     private static final String ACCOUNT_NOT_FOUND = "Account not found";
     private static final String JOURNAL_ENTRY_NOT_FOUND = "Journal entry not found";
+    private static final String AGGREGATE_TYPE = "journal_entry";
+    private static final String POSTINGS_CREATED = "PostingsCreated";
 
     private final PostingRepository postingRepository;
     private final JournalEntryRepository journalEntryRepository;
     private final AccountRepository accountRepository;
     private final PostingMapper postingMapper;
     private final AccountAccessChecker accountAccessChecker;
+    private final OutboxEventService outboxEventService;
 
     // Admin-only (enforced in the controller); joins the caller's transaction when called from JournalEntryService
     @Override
@@ -62,7 +66,10 @@ public class PostingServiceImpl implements PostingService {
         }).toList();
         // TODO: apply postings to account balances
 
-        return postingMapper.toDtos(postingRepository.saveAll(postings));
+        // Keyed by the journal entry, so it stays ordered after that entry's JournalEntryCreated
+        List<PostingDto> dtos = postingMapper.toDtos(postingRepository.saveAll(postings));
+        outboxEventService.record(AGGREGATE_TYPE, journalEntryId, POSTINGS_CREATED, dtos);
+        return dtos;
     }
 
     @Override

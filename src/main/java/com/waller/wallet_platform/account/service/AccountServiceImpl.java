@@ -1,6 +1,8 @@
 package com.waller.wallet_platform.account.service;
 
 import java.util.List;
+
+import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,11 +25,15 @@ import com.waller.wallet_platform.account.repository.AccountRepository;
 public class AccountServiceImpl implements AccountService {
 
     private static final String ACCOUNT_NOT_FOUND = "Account not found";
+    private static final String AGGREGATE_TYPE = "account";
+    private static final String ACCOUNT_CREATED = "AccountCreated";
 
     private final AccountRepository accountRepository;
     private final AppUserRepository userRepository;
     private final AccountMapper accountMapper;
     private final AccountAccessChecker accountAccessChecker;
+    private final OutboxEventService outboxEventService;
+
 
     @Override
     @Transactional
@@ -41,6 +47,7 @@ public class AccountServiceImpl implements AccountService {
         Account saved = accountRepository.save(account);
         log.info("Account {} created for user {}", saved.getId(), user.getId());
 
+        outboxEventService.record(AGGREGATE_TYPE,account.getId(),ACCOUNT_CREATED,accountMapper.toAccountDto(saved));
         return accountMapper.toAccountDto(saved);
     }
 

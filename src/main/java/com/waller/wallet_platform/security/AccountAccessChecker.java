@@ -8,7 +8,8 @@ import com.waller.wallet_platform.account.entity.Account;
 import com.waller.wallet_platform.account.repository.AccountRepository;
 import lombok.RequiredArgsConstructor;
 
-// Decides whether the current user may see an account's data: its owner or an admin
+// Decides whether the current user may see an account's data: its owner or an admin.
+// System accounts are never visible here, not even to admins; only reconciliation reads them.
 @Component
 @RequiredArgsConstructor
 public class AccountAccessChecker {
@@ -26,17 +27,14 @@ public class AccountAccessChecker {
     /** False for unknown accounts too, so callers can answer both cases with the same 404. */
     @Transactional(readOnly = true)
     public boolean canAccess(Long accountId) {
-        if (isAdmin()) {
-            return accountRepository.existsById(accountId);
-        }
-        return accountRepository.findById(accountId)
-                .map(this::isOwner)
+        return accountRepository.findUserAccountById(accountId)
+                .map(this::canAccess)
                 .orElse(false);
     }
 
     /** For an account already loaded (e.g. through a deposit or transfer); its user must be fetchable. */
     public boolean canAccess(Account account) {
-        return isAdmin() || isOwner(account);
+        return !account.isSystem() && (isAdmin() || isOwner(account));
     }
 
     // The principal's name is the user's email (see AppUserDetailsService)
