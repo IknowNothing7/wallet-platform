@@ -1,6 +1,6 @@
 package com.waller.wallet_platform.common.idempotency;
 
-import com.waller.wallet_platform.user.AppUser;
+import com.waller.wallet_platform.user.entity.AppUser;
 import java.io.Serializable;
 import java.time.Instant;
 import org.hibernate.annotations.CreationTimestamp;

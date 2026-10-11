@@ -1,7 +1,7 @@
 package com.waller.wallet_platform.security;
 
 import com.waller.wallet_platform.common.constants.AuthenticationConstants;
-import com.waller.wallet_platform.user.AppUser;
+import com.waller.wallet_platform.user.entity.AppUser;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;

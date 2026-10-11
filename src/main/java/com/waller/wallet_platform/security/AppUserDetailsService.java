@@ -8,8 +8,8 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import com.waller.wallet_platform.user.AppUser;
-import com.waller.wallet_platform.user.AppUserRepository;
+import com.waller.wallet_platform.user.entity.AppUser;
+import com.waller.wallet_platform.user.repository.AppUserRepository;
 import com.waller.wallet_platform.common.util.EmailUtils;
 import lombok.RequiredArgsConstructor;
 
