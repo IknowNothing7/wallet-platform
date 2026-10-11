@@ -1,7 +1,7 @@
 package com.waller.wallet_platform.security;
 
-import com.waller.wallet_platform.model.constants.AuthenticationConstants;
-import com.waller.wallet_platform.model.entites.AppUser;
+import com.waller.wallet_platform.common.constants.AuthenticationConstants;
+import com.waller.wallet_platform.user.AppUser;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
@@ -9,16 +9,13 @@ import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-
 import javax.crypto.SecretKey;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
-
 
 @Component
 @Slf4j 
