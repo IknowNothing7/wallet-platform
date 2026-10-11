@@ -37,7 +37,7 @@ public class DepositServiceImpl implements DepositService {
     @Override
     @Transactional
     public DepositDto createDeposit(DepositRequest request) {
-        Account account = accountRepository.findById(request.getAccountId())
+        Account account = accountRepository.findUserAccountById(request.getAccountId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "Account " + request.getAccountId() + " not found"));
 

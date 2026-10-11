@@ -17,6 +17,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import com.waller.wallet_platform.hold.service.HoldService;
+import com.waller.wallet_platform.hold.dto.HoldCaptureRequest;
 import com.waller.wallet_platform.hold.dto.HoldDto;
 import com.waller.wallet_platform.hold.dto.HoldRequest;
 
@@ -46,6 +47,26 @@ public class HoldController {
             @RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
             @RequestParam(name = "size", defaultValue = "20") @Min(1) @Max(100) int size) {
         return ApiResponse.ok(holdService.getAccountHolds(accountId, page, size));
+    }
+
+    // Safe to retry: repeating a transition on a hold already in that state returns it unchanged
+    @PostMapping("/{id}/capture")
+    @PreAuthorize("hasRole('MERCHANT')")
+    public ApiResponse<HoldDto> captureHold(@PathVariable("id") Long id,
+                                            @Valid @RequestBody HoldCaptureRequest request) {
+        return ApiResponse.ok(holdService.captureHold(id, request));
+    }
+
+    @PostMapping("/{id}/release")
+    @PreAuthorize("hasRole('MERCHANT')")
+    public ApiResponse<HoldDto> releaseHold(@PathVariable("id") Long id) {
+        return ApiResponse.ok(holdService.releaseHold(id));
+    }
+
+    @PostMapping("/{id}/expire")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<HoldDto> expireHold(@PathVariable("id") Long id) {
+        return ApiResponse.ok(holdService.expireHold(id));
     }
 
 }

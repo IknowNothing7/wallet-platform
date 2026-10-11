@@ -21,6 +21,7 @@ import com.waller.wallet_platform.security.JwtTokenProvider;
 import com.waller.wallet_platform.security.RateLimiter;
 import com.waller.wallet_platform.common.util.EmailUtils;
 import com.waller.wallet_platform.common.util.PasswordUtils;
+import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -36,6 +37,8 @@ public class AuthServiceImpl implements AuthService {
     private static final String TOKEN_TYPE = "Bearer";
     private static final String INVALID_CREDENTIALS = "Invalid email or password";
     private static final String EMAIL_TAKEN = "Email is already registered";
+    private static final String AGGREGATE_TYPE = "user";
+    private static final String USER_CREATED = "UserCreated";
     private static final String TOO_MANY_FAILED_LOGINS = "Too many failed login attempts, try again later";
 
     private final AppUserRepository userRepository;
@@ -43,6 +46,7 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final RefreshTokenService refreshTokenService;
+    private final OutboxEventService outboxEventService;
 
     private final AccessTokenDenylist accessTokenDenylist;
 
@@ -122,6 +126,9 @@ public class AuthServiceImpl implements AuthService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, EMAIL_TAKEN);
         }
         log.info("User {} registered", saved.getId());
+
+        // Same event as an admin-created user; the DTO keeps the password hash out of it
+        outboxEventService.record(AGGREGATE_TYPE, saved.getId(), USER_CREATED, userMapper.toDto(saved));
 
         return ApiResponse.ok(buildResponse(saved, refreshTokenService.issue(saved)));
     }

@@ -49,11 +49,11 @@ public class TransferServiceImpl implements TransferService {
     @Override
     @Transactional
     public TransferDto createTransfer(TransferRequest request) {
-        Account accountFrom = accountRepository.findById(request.getIdFromAccount())
+        Account accountFrom = accountRepository.findUserAccountById(request.getIdFromAccount())
                 .orElseThrow(()-> new ResponseStatusException(HttpStatus.NOT_FOUND,
         "Account " + request.getIdFromAccount() + " not found"));
 
-        Account accountTo = accountRepository.findById(request.getIdToAccount())
+        Account accountTo = accountRepository.findUserAccountById(request.getIdToAccount())
                 .orElseThrow(()-> new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "Account " + request.getIdFromAccount() + " not found"));
 

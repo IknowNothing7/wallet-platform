@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import com.waller.wallet_platform.common.util.EmailUtils;
 import com.waller.wallet_platform.common.util.PasswordUtils;
+import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import com.waller.wallet_platform.user.dto.AppUserDto;
@@ -22,10 +23,13 @@ import com.waller.wallet_platform.user.repository.AppUserRepository;
 public class AppUserServiceImpl implements AppUserService {
 
     private static final String EMAIL_TAKEN = "Email is already registered";
+    private static final String AGGREGATE_TYPE = "user";
+    private static final String USER_CREATED = "UserCreated";
 
     private final AppUserRepository userRepository;
     private final AppUserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
+    private final OutboxEventService outboxEventService;
 
     @Override
     @Transactional
@@ -50,7 +54,10 @@ public class AppUserServiceImpl implements AppUserService {
         }
         log.info("User {} created", saved.getId());
 
-        return userMapper.toDto(saved);
+        // The DTO, not the entity, so the password hash never reaches the event
+        AppUserDto dto = userMapper.toDto(saved);
+        outboxEventService.record(AGGREGATE_TYPE, saved.getId(), USER_CREATED, dto);
+        return dto;
     }
 
 }
