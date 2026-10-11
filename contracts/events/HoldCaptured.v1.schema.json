@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.wallet-platform.local/events/HoldCaptured.v1.schema.json",
+  "title": "HoldCaptured",
+  "description": "Reserved funds were charged.",
+  "x-event-type": "HoldCaptured",
+  "x-event-version": 1,
+  "x-topic": "wallet.hold",
+  "x-key": "aggregate id, as a decimal string",
+  "type": "object",
+  "required": [
+    "id",
+    "createdAt",
+    "updatedAt",
+    "accountId",
+    "amount",
+    "currency",
+    "status",
+    "expiresAt",
+    "capturedEntryId",
+    "releasedAt"
+  ],
+  "properties": {
+    "id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "accountId": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Id of another wallet aggregate"
+    },
+    "amount": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Minor units (cents)"
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "description": "ISO 4217 code"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "CAPTURED",
+        "RELEASED",
+        "EXPIRED"
+      ]
+    },
+    "expiresAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "capturedEntryId": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "description": "Journal entry of the capture; set once CAPTURED"
+    },
+    "releasedAt": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  },
+  "additionalProperties": true,
+  "examples": [
+    {
+      "id": 5,
+      "createdAt": "2026-10-11T08:49:42.695Z",
+      "updatedAt": "2026-10-11T08:49:42.695Z",
+      "accountId": 7,
+      "amount": 990,
+      "currency": "EUR",
+      "status": "CAPTURED",
+      "expiresAt": "2026-10-18T08:49:42.695Z",
+      "capturedEntryId": 31,
+      "releasedAt": null
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.wallet-platform.local/events/TransferCreated.v1.schema.json",
+  "title": "TransferCreated",
+  "description": "Money moved between two wallet accounts.",
+  "x-event-type": "TransferCreated",
+  "x-event-version": 1,
+  "x-topic": "wallet.transfer",
+  "x-key": "aggregate id, as a decimal string",
+  "type": "object",
+  "required": [
+    "id",
+    "createdAt",
+    "updatedAt",
+    "fromAccountId",
+    "toAccountId",
+    "amount",
+    "currency",
+    "status",
+    "failureReason"
+  ],
+  "properties": {
+    "id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "fromAccountId": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Id of another wallet aggregate"
+    },
+    "toAccountId": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Id of another wallet aggregate"
+    },
+    "amount": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Minor units (cents)"
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "description": "ISO 4217 code"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PENDING",
+        "COMPLETED",
+        "FAILED",
+        "REVERSED"
+      ]
+    },
+    "failureReason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": true,
+  "examples": [
+    {
+      "id": 11,
+      "createdAt": "2026-10-11T08:49:42.695Z",
+      "updatedAt": "2026-10-11T08:49:42.695Z",
+      "fromAccountId": 7,
+      "toAccountId": 9,
+      "amount": 250,
+      "currency": "EUR",
+      "status": "COMPLETED",
+      "failureReason": null
+    }
+  ]
+}

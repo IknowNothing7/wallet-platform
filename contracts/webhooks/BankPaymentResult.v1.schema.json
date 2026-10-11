@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.wallet-platform.local/webhooks/BankPaymentResult.v1.schema.json",
+  "title": "BankPaymentResult",
+  "description": "POST from bank-sim to wallet-service with the final result of a payment. Delivered at least once with an identical body; deduplicate by reference.",
+  "x-headers": {
+    "X-Bank-Timestamp": "Unix seconds when this attempt was signed",
+    "X-Bank-Signature": "sha256=<hex HMAC-SHA256 of \"<X-Bank-Timestamp>.<raw body>\" with the shared secret>"
+  },
+  "type": "object",
+  "required": [
+    "reference",
+    "walletDepositId",
+    "status",
+    "amount",
+    "currency",
+    "failureReason",
+    "occurredAt"
+  ],
+  "properties": {
+    "reference": {
+      "type": "string",
+      "description": "bank-sim payment reference, equals the deposit's gatewayReference"
+    },
+    "walletDepositId": {
+      "type": "string",
+      "description": "Echo of the id wallet-service sent with the payment"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "SUCCEEDED",
+        "FAILED"
+      ]
+    },
+    "amount": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Minor units (cents)"
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "description": "ISO 4217 code"
+    },
+    "failureReason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this attempt was sent, not when the payment settled"
+    }
+  },
+  "additionalProperties": true,
+  "examples": [
+    {
+      "reference": "bsim_d7ed31d1-152b-4e19-abc2-db8f39c650d5",
+      "walletDepositId": "42",
+      "status": "SUCCEEDED",
+      "amount": 1500,
+      "currency": "EUR",
+      "failureReason": null,
+      "occurredAt": "2026-10-11T08:49:42.695Z"
+    }
+  ]
+}
