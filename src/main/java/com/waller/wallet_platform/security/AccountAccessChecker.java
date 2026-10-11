@@ -4,10 +4,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
-
-import com.waller.wallet_platform.model.entites.Account;
-import com.waller.wallet_platform.repositories.AccountRepository;
-
+import com.waller.wallet_platform.account.Account;
+import com.waller.wallet_platform.account.AccountRepository;
 import lombok.RequiredArgsConstructor;
 
 // Decides whether the current user may see an account's data: its owner or an admin

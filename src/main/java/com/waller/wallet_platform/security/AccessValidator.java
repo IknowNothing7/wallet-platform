@@ -1,15 +1,13 @@
 package com.waller.wallet_platform.security;
 
 import org.springframework.stereotype.Component;
-
-import com.waller.wallet_platform.exception.DataExistException;
-import com.waller.wallet_platform.exception.InvalidDataException;
-import com.waller.wallet_platform.model.enums.ApiLogErrors;
-import com.waller.wallet_platform.repositories.AppUserRepository;
-import com.waller.wallet_platform.utils.ApiUtils;
-import com.waller.wallet_platform.utils.EmailUtils;
-import com.waller.wallet_platform.utils.PasswordUtils;
-
+import com.waller.wallet_platform.common.exception.DataExistException;
+import com.waller.wallet_platform.common.exception.InvalidDataException;
+import com.waller.wallet_platform.common.exception.ApiLogErrors;
+import com.waller.wallet_platform.user.AppUserRepository;
+import com.waller.wallet_platform.common.util.ApiUtils;
+import com.waller.wallet_platform.common.util.EmailUtils;
+import com.waller.wallet_platform.common.util.PasswordUtils;
 import lombok.RequiredArgsConstructor;
 
 @Component 
