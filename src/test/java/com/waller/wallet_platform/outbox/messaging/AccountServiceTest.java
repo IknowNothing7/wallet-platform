@@ -92,6 +92,7 @@ public class AccountServiceTest {
     @Test
     void getIdByAccountExistReturnAccountDto() {
         when(accountRepository.findById(1L)).thenReturn(Optional.of(testAccount));
+        when(accessChecker.canAccess(testAccount)).thenReturn(true);
         when(accountMapper.toAccountDto(testAccount)).thenReturn(accountDto);
         log.info("ACCOUNT {}",testAccount.getId());
 
