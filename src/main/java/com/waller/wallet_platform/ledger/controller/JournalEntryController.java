@@ -1,6 +1,9 @@
 package com.waller.wallet_platform.ledger.controller;
 
 import java.util.ArrayList;
+
+import com.waller.wallet_platform.common.util.ApiUtils;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,6 +28,7 @@ import com.waller.wallet_platform.ledger.service.JournalEntryService;
 @RequiredArgsConstructor
 @RequestMapping("/journal-entry")
 @PreAuthorize("hasRole('ADMIN')")
+@Slf4j
 public class JournalEntryController {
 
     private final JournalEntryService journalEntryService;
@@ -32,6 +36,7 @@ public class JournalEntryController {
     @PostMapping("/create")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<JournalEntryDto> createJournalEntry(@Valid @RequestBody JournalEntryRequest request) {
+        log.info("Endpoint {}", ApiUtils.getMethodName());
         return ApiResponse.ok(journalEntryService.createJournalEntry(request));
     }
 

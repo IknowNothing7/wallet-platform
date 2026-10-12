@@ -1,5 +1,7 @@
 package com.waller.wallet_platform.outbox.controller;
 
+import com.waller.wallet_platform.common.util.ApiUtils;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -20,6 +22,7 @@ import com.waller.wallet_platform.outbox.entity.OutboxStatus;
 @RequiredArgsConstructor
 @RequestMapping("/outbox")
 @PreAuthorize("hasRole('ADMIN')")
+@Slf4j
 public class OutboxEventController {
 
     private final OutboxEventService outboxEventService;
@@ -41,6 +44,7 @@ public class OutboxEventController {
             @RequestParam(name = "status", required = false) OutboxStatus status,
             @RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
             @RequestParam(name = "size", defaultValue = "20") @Min(1) @Max(100) int size) {
+        log.info("Endpoint {}", ApiUtils.getMethodName());
         return ApiResponse.ok(outboxEventService.getEvents(status, page, size));
     }
 

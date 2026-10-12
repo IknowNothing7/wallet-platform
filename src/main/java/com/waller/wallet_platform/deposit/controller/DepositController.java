@@ -1,5 +1,7 @@
 package com.waller.wallet_platform.deposit.controller;
 
+import com.waller.wallet_platform.common.util.ApiUtils;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,6 +24,7 @@ import com.waller.wallet_platform.deposit.service.DepositService;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/deposit")
+@Slf4j
 public class DepositController {
 
     private final DepositService depositService;
@@ -29,6 +32,7 @@ public class DepositController {
     @PostMapping("/create")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<DepositDto> createDeposit(@Valid @RequestBody DepositRequest request) {
+        log.info("Endpoint {}", ApiUtils.getMethodName());
         return ApiResponse.ok(depositService.createDeposit(request));
     }
 

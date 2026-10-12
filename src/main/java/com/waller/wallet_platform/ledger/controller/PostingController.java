@@ -2,6 +2,9 @@ package com.waller.wallet_platform.ledger.controller;
 
 import java.util.ArrayList;
 import java.util.List;
+
+import com.waller.wallet_platform.common.util.ApiUtils;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,6 +28,7 @@ import com.waller.wallet_platform.ledger.dto.PostingRequest;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/posting")
+@Slf4j
 public class PostingController {
 
     private final PostingService postingService;
@@ -36,6 +40,7 @@ public class PostingController {
     public ApiResponse<ArrayList<PostingDto>> createPostings(
             @PathVariable("journalEntryId") Long journalEntryId,
             @RequestBody List<@Valid PostingRequest> requests) {
+        log.info("Endpoint {}", ApiUtils.getMethodName());
         return ApiResponse.ok(new ArrayList<>(postingService.createPostings(journalEntryId, requests)));
     }
 
