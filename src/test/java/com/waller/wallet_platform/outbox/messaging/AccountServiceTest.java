@@ -7,6 +7,7 @@ import com.waller.wallet_platform.account.mapper.AccountMapper;
 import com.waller.wallet_platform.account.repository.AccountRepository;
 import com.waller.wallet_platform.account.service.AccountServiceImpl;
 import com.waller.wallet_platform.auth.service.RefreshTokenService;
+import com.waller.wallet_platform.common.exception.NotFoundException;
 import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import com.waller.wallet_platform.security.AccessTokenDenylist;
 import com.waller.wallet_platform.security.AccountAccessChecker;
@@ -27,9 +28,10 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.util.Optional;
 
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 @Slf4j
 @ExtendWith(MockitoExtension.class)
@@ -105,6 +107,19 @@ public class AccountServiceTest {
         assertEquals(accountDto.currency(),result.currency());
         assertEquals(accountDto.balance(),result.balance());
 
+        verify(accountRepository, times(1)).findById(1L);
+        verify(accountMapper, times(1)).toAccountDto(testAccount);
 
+    }
+
+    @Test
+    void getByIdAndAccountNotFoundThrowsException() {
+        when(accountRepository.findById(1000L)).thenReturn(Optional.empty());
+        when(accessChecker.canAccess(testAccount)).thenReturn(true);
+
+        assertThatThrownBy(()-> service.getAccount(1000L)).isInstanceOf(NotFoundException.class)
+                .hasMessageContaining("Account not found");
+
+        verify(accountRepository, times(1)).findById(1000L);
     }
 }
