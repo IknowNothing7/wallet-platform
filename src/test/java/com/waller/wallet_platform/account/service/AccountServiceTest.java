@@ -1,13 +1,11 @@
-package com.waller.wallet_platform.outbox.messaging;
+package com.waller.wallet_platform.account.service;
 
 import com.waller.wallet_platform.account.dto.AccountDto;
 import com.waller.wallet_platform.account.entity.Account;
 import com.waller.wallet_platform.account.entity.AccountStatus;
 import com.waller.wallet_platform.account.mapper.AccountMapper;
 import com.waller.wallet_platform.account.repository.AccountRepository;
-import com.waller.wallet_platform.account.service.AccountServiceImpl;
 import com.waller.wallet_platform.auth.service.RefreshTokenService;
-import com.waller.wallet_platform.common.exception.NotFoundException;
 import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import com.waller.wallet_platform.security.AccessTokenDenylist;
 import com.waller.wallet_platform.security.AccountAccessChecker;
@@ -25,6 +23,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Optional;
 
@@ -115,9 +114,8 @@ public class AccountServiceTest {
     @Test
     void getByIdAndAccountNotFoundThrowsException() {
         when(accountRepository.findById(1000L)).thenReturn(Optional.empty());
-        when(accessChecker.canAccess(testAccount)).thenReturn(true);
 
-        assertThatThrownBy(()-> service.getAccount(1000L)).isInstanceOf(NotFoundException.class)
+        assertThatThrownBy(()-> service.getAccount(1000L)).isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("Account not found");
 
         verify(accountRepository, times(1)).findById(1000L);

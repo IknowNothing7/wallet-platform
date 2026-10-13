@@ -1,8 +1,8 @@
-package com.waller.wallet_platform.outbox.messaging;
+package com.waller.wallet_platform.user.service;
 
+import com.waller.wallet_platform.common.util.PasswordUtils;
 import com.waller.wallet_platform.outbox.entity.OutboxEvent;
 import com.waller.wallet_platform.outbox.service.OutboxEventService;
-import com.waller.wallet_platform.outbox.service.OutboxEventServiceImpl;
 import com.waller.wallet_platform.user.dto.AppUserDto;
 import com.waller.wallet_platform.user.dto.AppUserRequest;
 import com.waller.wallet_platform.user.entity.AppUser;
@@ -18,10 +18,14 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.web.server.ResponseStatusException;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -38,10 +42,7 @@ public class AppUserServiceTest {
     private PasswordEncoder passwordEncoder;
 
     @Mock
-    private OutboxEventServiceImpl outboxEventService;
-
-    @Mock
-    private OutboxEvent event;
+    private OutboxEventService outboxEventService;
 
     @InjectMocks
     private AppUserServiceImpl service;
@@ -74,11 +75,11 @@ public class AppUserServiceTest {
     }
 
     @Test
-    void makeSomethingUseful() {
+    void createUserTest() {
         when(mapper.requestToEntity(request)).thenReturn(testUser);
+        when(mapper.toDto(testUser)).thenReturn(testUserDto);
+        when(passwordEncoder.encode(request.getPassword())).thenReturn((testUser.getPasswordHash()));
         when(repository.saveAndFlush(testUser)).thenReturn(testUser);
-        when(service.createUser(request)).thenReturn(testUserDto);
-        doNothing().when(outboxEventService.record("TEST", testUser.getId(), "USER_CREATED", testUserDto));
         AppUserDto result = service.createUser(request);
 
         assertNotNull(result);
@@ -87,5 +88,36 @@ public class AppUserServiceTest {
         assertEquals(result.email(), testUserDto.email());
         assertEquals(result.role(), testUserDto.role());
 
+        verify(outboxEventService).record("user", 1L, "UserCreated", testUserDto);
+        verify(mapper, times(1)).requestToEntity(request);
+        verify(mapper, times(1)).toDto(testUser);
+        verify(passwordEncoder, times(1)).encode((request.getPassword()));
+        verify(repository, times(1)).saveAndFlush(testUser);
     }
+
+    @Test
+    void ifUserEmailExistThenThrowException() {
+        when(repository.existsByEmailIgnoreCase(request.getEmail())).thenReturn(true);
+
+        assertThatThrownBy(() -> service.createUser(request)).isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("Email is already registered");
+
+        verify(repository, times(1)).existsByEmailIgnoreCase(request.getEmail());
+    }
+
+    @Test
+    void ifPasswordIsNotValidThenThrowException() {
+        AppUserRequest badRequest = AppUserRequest.builder()
+                .name("TestUser")
+                .email("test@email.com")
+                .password("short")
+                .build();
+
+        assertThatThrownBy(() -> service.createUser(badRequest))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining(PasswordUtils.INVALID_PASSWORD_MESSAGE);
+
+        verifyNoInteractions(repository, mapper, passwordEncoder, outboxEventService);
+    }
+
 }
