@@ -198,6 +198,9 @@ class HoldControllerSecurityTest {
                 .andExpect(jsonPath("$.payload.id").value(10));
     }
 
+    // TODO: Missing role cases: ADMIN capture/release (both should be 403), and noUser for capture/release/expire.
+    // TODO: No test sends a real JWT through JwtAuthenticationFilter (valid, expired, denylisted token). Cover that
+    //  once in a security test, not per controller.
     @Test
     @WithMockUser(roles = "USER")
     void user_getAccountHolds_reachesService() throws Exception {

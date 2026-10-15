@@ -40,6 +40,8 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import java.util.List;
 import java.util.Optional;
 
+// TODO: PER_METHOD is already JUnit's default; remove @TestInstance here, in AccountServiceTest and AppUserServiceTest.
+//  Also remove the unused imports (DepositServiceImpl is in this package).
 @ExtendWith(MockitoExtension.class)
 @TestInstance(TestInstance.Lifecycle.PER_METHOD)
 public class DepositServiceTest {
@@ -112,9 +114,11 @@ public class DepositServiceTest {
 
         assertEquals(deposit.getAccount().getId(), result.accountId());
         assertEquals(deposit.getAmount(), result.amount());
+        // TODO: Argument order is reversed (expected value goes first), so a failure message would be misleading.
         assertEquals(deposit.getStatus(), DepositStatus.PENDING);
         assertEquals(deposit.getCurrency(), result.currency());
 
+        // TODO: This should be account.getId(). It passes only because the user and account ids are both 1.
         verify(accountRepository,times(1)).findUserAccountById(appUser.getId());
         verify(mapper,times(1)).requestToEntity(request);
         verify(repository,times(1)).save(deposit);
@@ -129,6 +133,8 @@ public class DepositServiceTest {
                 .hasMessageContaining("Account 1 not found");
 
         verify(accountRepository,times(1)).findUserAccountById(request.getAccountId());
+        // TODO: Also verifyNoInteractions(repository, outboxEventService). Without it, a deposit saved before the
+        //  account check would still pass.
     }
 
 @Test
@@ -163,4 +169,8 @@ void getAccountDeposits_noAccess_throwsNotFound() {
     verifyNoInteractions(repository, mapper);
 }
 
+// TODO: Missing cases: currency mismatch (400, nothing saved), and getDeposit for your own deposit, someone else's,
+//  and a missing one. Also reformat the last two tests; their indentation is off.
+// TODO: createDeposit doesn't check account status (HoldServiceImpl rejects non-ACTIVE accounts). Decide whether
+//  deposits into a FROZEN account should be allowed, then add a test either way.
 }

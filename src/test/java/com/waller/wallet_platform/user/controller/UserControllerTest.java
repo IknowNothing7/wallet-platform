@@ -23,6 +23,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
+import static com.waller.wallet_platform.support.TestData.user;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Testcontainers
@@ -87,7 +88,10 @@ class UserControllerTest {
                 .statusCode(401);
     }
 
-    private static AppUser user(String name, String email, UserRole role) {
-        return AppUser.builder().name(name).email(email).passwordHash("unused").role(role).build();
-    }
+    // TODO: Missing endpoint tests:
+    //  - POST /user/create: 201; the password hash never appears in the response; a duplicate email in different
+    //    case gives 409.
+    //  - GET /user paging (page/size) and @Max(100) on size give 400 with the parameter name.
+    //  - UserSearchRequest / UserSortField are never used in main code; either wire them into GET /user and test
+    //    them, or delete them.
 }

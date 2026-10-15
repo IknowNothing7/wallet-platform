@@ -137,6 +137,8 @@ public class HoldServiceTest {
         verify(outboxEventService).record("hold", 10L, "HoldCreated", holdDto);
     }
 
+    // TODO: Also verify that sumAmountByAccountIdAndStatus received "now" and not some other Instant. Expired-but-still-
+    //  ACTIVE holds must not count against the balance, and with any(Instant.class) that bug would go unnoticed.
     @Test
     void createHold_allowsAmountEqualToAvailableBalance() {
         when(accountRepository.findUserAccountByIdForUpdate(1L)).thenReturn(Optional.of(account));
@@ -293,6 +295,7 @@ public class HoldServiceTest {
         verify(outboxEventService).record("hold", 10L, "HoldCaptured", holdDto);
     }
 
+    // TODO: Missing: a capture whose destination is a system account (findUserAccountById hides it, so it should be a 404).
     @Test
     void captureHold_alreadyCaptured_isIdempotent() {
         hold.setStatus(HoldStatus.CAPTURED);
@@ -473,4 +476,10 @@ public class HoldServiceTest {
 
         verifyNoInteractions(outboxEventService);
     }
+
+    // TODO: Missing: releaseHold / expireHold for a hold that doesn't exist (404).
+    // TODO: Missing: the access check on capture/release, if merchants should only touch holds they created
+    //  (currently any MERCHANT may capture any hold).
+    // TODO: The FOR UPDATE locking and the active-hold sum are only mocked here. Add a Testcontainers test where two
+    //  holds race for the last of the balance and only one succeeds.
 }

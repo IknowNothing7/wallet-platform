@@ -9,7 +9,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
-import com.waller.wallet_platform.account.entity.Account;
 import com.waller.wallet_platform.account.repository.AccountRepository;
 import com.waller.wallet_platform.ledger.dto.PostingDto;
 import com.waller.wallet_platform.ledger.dto.PostingRequest;
@@ -32,6 +31,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static com.waller.wallet_platform.support.TestData.account;
 
 import java.util.List;
 import java.util.Optional;
@@ -106,10 +106,13 @@ public class PostingServiceTest {
         verify(outboxEventService).record(eq("journal_entry"), eq(JOURNAL_ENTRY_ID), eq("PostingsCreated"), eq(dtos));
     }
 
-    private static Account account(Long id, String currency) {
-        Account account = new Account();
-        account.setId(id);
-        account.setCurrency(currency);
-        return account;
-    }
+    // TODO: Missing cases from createPostings:
+    //  - an unknown journal entry gives 404 and nothing is saved
+    //  - an unknown account gives "Account X not found"
+    //  - a posting whose currency differs from its account gives 400
+    //  - fewer than two postings gives "At least two postings are required"
+    //  - balancing is per currency: a USD debit against an EUR credit of the same amount gives 400
+    //  - getPosting for someone else's posting gives 404
+    // TODO: PostingServiceImpl still has "TODO: apply postings to account balances". When that's done, add tests that
+    //  check the balances, ideally against Postgres.
 }

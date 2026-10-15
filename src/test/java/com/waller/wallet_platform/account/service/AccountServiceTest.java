@@ -37,6 +37,9 @@ import static org.mockito.Mockito.*;
 @TestInstance(TestInstance.Lifecycle.PER_METHOD)
 public class AccountServiceTest {
 
+    // TODO: AccountServiceImpl only takes accountRepository, userRepository, accountMapper, accountAccessChecker and
+    //  outboxEventService. Remove the other mocks (userMapper, passwordEncoder, jwtTokenProvider, refreshTokenService,
+    //  accessTokenDenylist); they look like dependencies but are never used.
     @Mock
     private AccountRepository accountRepository;
     @Mock
@@ -95,6 +98,8 @@ public class AccountServiceTest {
         when(accountRepository.findById(1L)).thenReturn(Optional.of(testAccount));
         when(accessChecker.canAccess(testAccount)).thenReturn(true);
         when(accountMapper.toAccountDto(testAccount)).thenReturn(accountDto);
+        // TODO: Remove the log line and @Slf4j. Also, the assertEquals below compare the mapper's own stub to itself;
+        //  assertThat(result).isEqualTo(accountDto) says the same thing in one line.
         log.info("ACCOUNT {}",testAccount.getId());
 
         AccountDto result = service.getAccount(1L);
@@ -120,4 +125,9 @@ public class AccountServiceTest {
 
         verify(accountRepository, times(1)).findById(1000L);
     }
+
+    // TODO: Missing cases:
+    //  - getAccount when the account exists but accessChecker.canAccess is false gives the same "Account not found".
+    //  - createAnAccount: happy path (records the outbox event), and an unknown user id.
+    //  - getMyAccounts.
 }

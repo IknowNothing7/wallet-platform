@@ -4,6 +4,8 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
+import static com.waller.wallet_platform.support.TestData.account;
+import static com.waller.wallet_platform.support.TestData.user;
 
 import java.util.List;
 
@@ -16,8 +18,6 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
-import com.waller.wallet_platform.account.entity.Account;
-import com.waller.wallet_platform.account.entity.AccountStatus;
 import com.waller.wallet_platform.account.repository.AccountRepository;
 import com.waller.wallet_platform.security.JwtTokenProvider;
 import com.waller.wallet_platform.user.entity.AppUser;
@@ -52,16 +52,20 @@ public class AccountControllerTest {
     @BeforeEach void setUp() {
         RestAssured.port=port;
         accountRepository.deleteAll();
+        // TODO: Users are never deleted. The next test that saves "admin@email.com" will fail on the unique email,
+        //  so also call appUserRepository.deleteAll() here, after accounts.
     }
 
     @Test 
     void getAllAccounts() {
+        // TODO: Rename: this user is called "Admin" but has role USER, and the test checks the owner's own accounts.
         AppUser currentUser = appUserRepository.save(user("Admin", "admin@email.com", UserRole.USER));
+        // TODO: Also save an account owned by another user and assert it is NOT returned; right now nothing proves
+        //  that /account returns only the caller's accounts.
         accountRepository.saveAll(List.of(
-                    newAccount(0, "USD", AccountStatus.ACTIVE, currentUser),
-                    newAccount(10000, "VND", AccountStatus.ACTIVE, currentUser),
-                    newAccount(50, "USD", AccountStatus.ACTIVE, currentUser)
-
+                    account(currentUser, 0, "USD"),
+                    account(currentUser, 10000, "VND"),
+                    account(currentUser, 50, "USD")
         ));
 
         given()
@@ -75,17 +79,17 @@ public class AccountControllerTest {
         .body("payload.balance", contains(0, 10000, 50));
     }
 
-       private static AppUser user(String name, String email, UserRole role) {
-        return AppUser.builder().name(name).email(email).passwordHash("unused").role(role).build();
+        @Test
+    void anonymousIsUnauthorized() {
+        given()
+        .when()
+                .get("/account")
+        .then()
+                .statusCode(401);
     }
 
-        private static Account newAccount(int balance, String currency, AccountStatus status, AppUser user) {
-            Account acc = new Account();
-            acc.setBalance((long) balance);
-            acc.setCurrency(currency);
-            acc.setStatus(status);
-            acc.setUser(user);
-
-            return acc;
-        }
+    // TODO: Missing endpoint tests:
+    //  - GET /account/{id}: owner gets 200; another user gets 404 (not 403); an admin can read any user account.
+    //  - GET /account/{id} for a system account gives 404, even for an admin.
+    //  - Account creation: happy path, plus a validation error such as a bad currency.
 }

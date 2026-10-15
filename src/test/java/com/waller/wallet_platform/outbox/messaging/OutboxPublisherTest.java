@@ -34,6 +34,8 @@ class OutboxPublisherTest {
     private KafkaTemplate<String, String> kafkaTemplate;
     private OutboxPublisher publisher;
 
+    // TODO: Either restore @SuppressWarnings("unchecked") (mock(KafkaTemplate.class) is an unchecked conversion) or
+    //  delete the commented-out line.
     @BeforeEach
 //    @SuppressWarnings("unchecked")
     void setUp() {
@@ -143,6 +145,20 @@ class OutboxPublisherTest {
         verify(kafkaTemplate, never()).send(any(ProducerRecord.class));
     }
 
+    // TODO: Missing publisher cases:
+    //  - After the pause runs out, publishing resumes, and a successful batch resets the backoff
+    //    (use initialBackoff = Duration.ZERO so nothing has to sleep).
+    //  - The backoff stops growing at maxBackoff.
+    //  - An exception that only wraps a RetriableException is still treated as "broker unavailable"
+    //    (the classify() cause chain).
+    //  - lastError is cut to 2000 characters.
+    //  - All five headers are set, not only event-id.
+    // TODO: Nothing covers OutboxEventServiceImpl, OutboxEventController or the native queries in OutboxRepository:
+    //  - Unit tests: retryEvent 404 vs 409; getEvents with and without a status; record() rejects calls outside
+    //    a transaction (Propagation.MANDATORY).
+    //  - Testcontainers: lockPendingBatch returns only PENDING rows, oldest first, and skips rows another
+    //    transaction has locked; resetFailedToPending resets only FAILED rows.
+    //  - Controller: non-admins get 403 on /outbox.
     private static OutboxEvent event(Long id) {
         OutboxEvent event = new OutboxEvent();
         event.setId(id);
