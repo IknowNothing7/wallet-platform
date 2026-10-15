@@ -1,5 +1,7 @@
 package com.waller.wallet_platform.auth.controller;
 
+import com.waller.wallet_platform.common.util.ApiUtils;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,6 +22,7 @@ import com.waller.wallet_platform.auth.service.AuthService;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/auth")
+@Slf4j
 public class AuthController {
 
     private static final String BEARER_PREFIX = "Bearer ";
@@ -29,6 +32,7 @@ public class AuthController {
     @PostMapping("/register")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<AuthResponse> register(@Valid @RequestBody RegistrationRequest request) {
+        log.info("Endpoint {}", ApiUtils.getMethodName());
         return authService.registerUser(request);
     }
 

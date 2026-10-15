@@ -1,6 +1,8 @@
 package com.waller.wallet_platform.user.service;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -8,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import com.waller.wallet_platform.common.util.EmailUtils;
 import com.waller.wallet_platform.common.util.PasswordUtils;
+import com.waller.wallet_platform.common.web.PageResponse;
 import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -58,6 +61,15 @@ public class AppUserServiceImpl implements AppUserService {
         AppUserDto dto = userMapper.toDto(saved);
         outboxEventService.record(AGGREGATE_TYPE, saved.getId(), USER_CREATED, dto);
         return dto;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResponse<AppUserDto> getUsers(int page, int size) {
+        // Sorted by id so pages stay stable between requests
+        return PageResponse.of(
+                userRepository.findAll(PageRequest.of(page, size, Sort.by("id"))),
+                userMapper::toDto);
     }
 
 }

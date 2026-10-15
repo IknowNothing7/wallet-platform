@@ -1,6 +1,8 @@
 package com.waller.wallet_platform.transfer.controller;
 
+import com.waller.wallet_platform.common.util.ApiUtils;
 import jakarta.validation.Valid;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import com.waller.wallet_platform.common.web.ApiResponse;
@@ -15,6 +17,7 @@ import com.waller.wallet_platform.transfer.service.TransferService;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/transfer")
+@Slf4j
 public class TransferController {
 
     private final TransferService transferService;
@@ -36,6 +39,7 @@ public class TransferController {
     @PostMapping("/create")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<TransferDto> createTransfer( @Valid @RequestBody TransferRequest request) {
+        log.info("Endpoint {}", ApiUtils.getMethodName());
         return ApiResponse.ok(transferService.createTransfer(request));
     }
 

@@ -1,5 +1,7 @@
 package com.waller.wallet_platform.hold.controller;
 
+import com.waller.wallet_platform.common.util.ApiUtils;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,6 +26,7 @@ import com.waller.wallet_platform.hold.dto.HoldRequest;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/hold")
+@Slf4j
 public class HoldController {
 
     private final HoldService holdService;
@@ -33,6 +36,7 @@ public class HoldController {
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasRole('MERCHANT')")
     public ApiResponse<HoldDto> createHold(@Valid @RequestBody HoldRequest request) {
+        log.info("Endpoint {}", ApiUtils.getMethodName());
         return ApiResponse.ok(holdService.createHold(request));
     }
 

@@ -1,6 +1,9 @@
 package com.waller.wallet_platform.account.controller;
 
 import java.util.ArrayList;
+
+import com.waller.wallet_platform.common.util.ApiUtils;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -19,6 +22,7 @@ import com.waller.wallet_platform.account.service.AccountService;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/account")
+@Slf4j
 public class AccountController {
 
     private final AccountService accountService;
@@ -26,6 +30,7 @@ public class AccountController {
     @PostMapping("/create")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<AccountDto> createNewAccount(@Valid @RequestBody AccountRequest accountRequest) {
+        log.info("Endpoint {}", ApiUtils.getMethodName());
         return ApiResponse.ok(accountService.createAnAccount(accountRequest));
     }
 
