@@ -170,9 +170,7 @@ public class PostingServiceTest {
 
     @Test
     void createOnlyOnePosting() {
-        Account account = account(1L,"USD");
         when(journalEntryRepository.existsById(JOURNAL_ENTRY_ID)).thenReturn(true);
-        when(accountRepository.findById(1L)).thenReturn(Optional.of(account));
 
         List<PostingRequest> requests = List.of(
                 new PostingRequest(1L, PostingDirection.DEBIT, 100L, "USD"));
@@ -187,10 +185,36 @@ public class PostingServiceTest {
         verify(outboxEventService, never()).record(anyString(), anyLong(), anyString(), any());
     }
 
-        // TODO: Missing cases from createPostings:
-        // - balancing is per currency: a USD debit against an EUR credit of the same
-        // amount gives 400
-        // - getPosting for someone else's posting gives 404
+    @Test
+    void createPostingsWithDifferentCurrencyBalancing() {
+        when(journalEntryRepository.existsById(JOURNAL_ENTRY_ID)).thenReturn(true);
+        List<PostingRequest> requests = List.of(
+                new PostingRequest(1L, PostingDirection.DEBIT, 100L, "USD"),
+                new PostingRequest(2L, PostingDirection.CREDIT, 100L, "EUR"));
+
+        assertThatThrownBy(() -> postingService.createPostings(JOURNAL_ENTRY_ID, requests))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
+                        .isEqualTo(HttpStatus.BAD_REQUEST))
+                .hasMessageContaining("Postings are not balanced");
+
+        verify(postingRepository, never()).saveAll(anyList());
+        verify(outboxEventService, never()).record(anyString(), anyLong(), anyString(), any());
+    }
+
+    @Test
+    void tryToGetPostingsFromDifferentAcc() {
+            Posting posting = new Posting();
+            posting.setAccountId(1L);
+            when(postingRepository.findById(1L)).thenReturn(Optional.of(posting));
+            when(accountAccessChecker.canAccess(1L)).thenReturn(false);
+
+        assertThatThrownBy(() -> postingService.getPosting(1L))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
+                        .isEqualTo(HttpStatus.NOT_FOUND))
+                .hasMessageContaining("Posting not found");
+    }
         // TODO: PostingServiceImpl still has "TODO: apply postings to account
         // balances". When that's done, add tests that
         // check the balances, ideally against Postgres.
