@@ -52,6 +52,26 @@ outbox:
     initial-backoff: PT1S   # doubles per consecutive failed batch...
     max-backoff: PT5M       # ...up to this
 
+bank:
+  base-url: ${BANK_SIM_URL:http://localhost:8081}
+  request-timeout: PT5S
+  webhook:
+    # Shared with bank-sim (BANK_SIM_WEBHOOK_SECRET there); verifies X-Bank-Signature
+    secret: ${BANK_SIM_WEBHOOK_SECRET:change-me-local-only}
+    tolerance: PT5M       # max age of X-Bank-Timestamp, against replays
+
+deposit:
+  reconciliation:
+    poll-interval: PT30S
+    stale-after: PT1M     # PENDING this long without a webhook: ask the bank
+    batch-size: 50
+
+transfer:
+  processing:
+    poll-interval: PT5S
+    pending-for: PT10S    # only pick up transfers this old, so a synchronous process() call isn't raced
+    batch-size: 100
+
 logging:
   level:
     org.flywaydb: DEBUG

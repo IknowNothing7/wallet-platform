@@ -4,6 +4,7 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -45,6 +46,8 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/user/create", "/account/create", "/error").permitAll()
                         .requestMatchers("/api/auth/**").permitAll()
+                        // bank-sim callbacks: authenticated by HMAC signature in BankWebhookController, not JWT
+                        .requestMatchers(HttpMethod.POST, "/webhooks/bank").permitAll()
                         .requestMatchers(
                                 "/swagger-ui/**", "/v3/api-docs/**",
                                 "/actuator/health", "/actuator/info", "/actuator/prometheus"

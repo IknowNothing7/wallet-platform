@@ -174,7 +174,6 @@ public class OutboxPublisher {
         log.info("Outbox publisher paused for {} after {} consecutive failed batch(es)", delay, consecutiveFailures);
     }
 
-    // The deepest cause usually names the real problem (KafkaProducerException wraps the client's exception)
     private static String describe(Throwable error) {
         Throwable root = error;
         while (root.getCause() != null && root.getCause() != root) {
