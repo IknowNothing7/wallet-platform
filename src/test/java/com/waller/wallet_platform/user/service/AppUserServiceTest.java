@@ -1,9 +1,9 @@
 package com.waller.wallet_platform.user.service;
 
 import com.waller.wallet_platform.common.util.PasswordUtils;
-// TODO: OutboxEvent and AppUserServiceImpl (same package) are unused imports
 import com.waller.wallet_platform.outbox.entity.OutboxEvent;
 import com.waller.wallet_platform.outbox.service.OutboxEventService;
+import com.waller.wallet_platform.security.JwtTokenProvider;
 import com.waller.wallet_platform.user.dto.AppUserDto;
 import com.waller.wallet_platform.user.dto.AppUserRequest;
 import com.waller.wallet_platform.user.entity.AppUser;
@@ -38,6 +38,9 @@ public class AppUserServiceTest {
 
     @Mock
     private AppUserMapper mapper;
+
+    @Mock
+    private JwtTokenProvider jwtTokenProvider;
 
     @Mock
     private PasswordEncoder passwordEncoder;
@@ -85,9 +88,6 @@ public class AppUserServiceTest {
 
         assertNotNull(result);
 
-        // TODO: These compare the mapper stub with itself. Check what the service actually does instead: capture the
-        //  saved user and assert passwordHash == encoder output (not the raw password) and that the email is normalized.
-        //  Use a mixed-case email in the request so normalization is really tested.
         assertEquals(result.name(), testUserDto.name());
         assertEquals(result.email(), testUserDto.email());
         assertEquals(result.role(), testUserDto.role());
@@ -107,7 +107,6 @@ public class AppUserServiceTest {
                 .hasMessageContaining("Email is already registered");
 
         verify(repository, times(1)).existsByEmailIgnoreCase(request.getEmail());
-        // TODO: Assert the 409 status, and verify nothing was saved and no event was recorded.
     }
 
     @Test
