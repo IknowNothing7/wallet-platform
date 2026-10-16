@@ -191,10 +191,7 @@ class TransferControllerTest {
     }
 
     // TODO: Add these once createTransfer is fixed:
-    //  - A user who doesn't own idFromAccount gets 404. Today the service doesn't check this, so anyone can create
     //    a transfer from someone else's account.
-    //  - A transfer to the same account gives 400. Today chk_transfer_distinct turns it into a 500.
-    //  - request.currency that differs from both accounts' currency gives 400.
     //  - An unknown destination account gives a 404 naming that account; the message currently uses the source id.
     @Test
     void anonymousIsUnauthorized() {
@@ -203,6 +200,44 @@ class TransferControllerTest {
                 .get("/transfer/account/{accountId}", aliceUsd.getId())
         .then()
                 .statusCode(401);
+    }
+
+    @Test
+    void userDoesntOwnAccount() {
+        long accountId= 132343213L;
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(alice))
+                .contentType(ContentType.JSON)
+                .body(transferBody(accountId, bobUsd.getId(), 250, "USD"))
+                .when()
+                .post("/transfer/create")
+                .then()
+                .statusCode(404)
+                .body("message", equalTo("Account " + accountId + " not found"));
+    }
+
+    @Test
+    void transferFromTheSameAccountAsTarget() {
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(alice))
+                .contentType(ContentType.JSON)
+                .body(transferBody(alice.getId(), alice.getId(), 250, "USD"))
+                .when()
+                .post("/transfer/create")
+                .then()
+                .statusCode(400);
+    }
+
+    @Test
+    void transferWithDifferentCurrency() {
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(alice))
+                .contentType(ContentType.JSON)
+                .body(transferBody(alice.getId(), bobUsd.getId(), 250, "ES"))
+                .when()
+                .post("/transfer/create")
+                .then()
+                .statusCode(400);
     }
 
     private static Map<String, Object> transferBody(Long from, Long to, long amount, String currency) {

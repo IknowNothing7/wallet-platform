@@ -58,7 +58,7 @@ public class PostingServiceTest {
 
     @Mock
     private OutboxEventService outboxEventService;
-tt
+
     @InjectMocks
     private PostingServiceImpl postingService;
 

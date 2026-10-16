@@ -18,6 +18,8 @@ import com.waller.wallet_platform.transfer.repository.TransferRepository;
 import com.waller.wallet_platform.transfer.dto.TransferRequest;
 import com.waller.wallet_platform.transfer.entity.Transfer;
 
+import java.util.Objects;
+
 @Service
 @Slf4j
 @RequiredArgsConstructor
@@ -61,6 +63,11 @@ public class TransferServiceImpl implements TransferService {
         if (!accountFrom.getCurrency().equals(accountTo.getCurrency())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Transfer currency does not match  the target account currency " + accountTo.getCurrency());
+        }
+
+        if(Objects.equals(accountFrom.getId(), accountTo.getId())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "You can not transfer to the same account");
         }
 
         Transfer transfer = transferRepository.saveAndFlush(transferMapper.requestToEntity(request));
