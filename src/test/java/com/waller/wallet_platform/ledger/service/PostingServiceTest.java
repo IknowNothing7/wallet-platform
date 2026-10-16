@@ -39,80 +39,115 @@ import java.util.Optional;
 @ExtendWith(MockitoExtension.class)
 public class PostingServiceTest {
 
-    private static final Long JOURNAL_ENTRY_ID = 7L;
+        private static final Long JOURNAL_ENTRY_ID = 7L;
 
-    @Mock
-    private PostingRepository postingRepository;
+        @Mock
+        private PostingRepository postingRepository;
 
-    @Mock
-    private JournalEntryRepository journalEntryRepository;
+        @Mock
+        private JournalEntryRepository journalEntryRepository;
 
-    @Mock
-    private AccountRepository accountRepository;
+        @Mock
+        private AccountRepository accountRepository;
 
-    @Mock
-    private PostingMapper postingMapper;
+        @Mock
+        private PostingMapper postingMapper;
 
-    @Mock
-    private AccountAccessChecker accountAccessChecker;
+        @Mock
+        private AccountAccessChecker accountAccessChecker;
 
-    @Mock
-    private OutboxEventService outboxEventService;
+        @Mock
+        private OutboxEventService outboxEventService;
 
-    @InjectMocks
-    private PostingServiceImpl postingService;
+        @InjectMocks
+        private PostingServiceImpl postingService;
 
-    @Test
-    void createPostings_rejectsUnbalancedPostings() {
-        when(journalEntryRepository.existsById(JOURNAL_ENTRY_ID)).thenReturn(true);
-        List<PostingRequest> requests = List.of(
-                new PostingRequest(1L, PostingDirection.DEBIT, 100L, "USD"),
-                new PostingRequest(2L, PostingDirection.CREDIT, 90L, "USD"));
+        @Test
+        void createPostings_rejectsUnbalancedPostings() {
+                when(journalEntryRepository.existsById(JOURNAL_ENTRY_ID)).thenReturn(true);
+                List<PostingRequest> requests = List.of(
+                                new PostingRequest(1L, PostingDirection.DEBIT, 100L, "USD"),
+                                new PostingRequest(2L, PostingDirection.CREDIT, 90L, "USD"));
 
-        assertThatThrownBy(() -> postingService.createPostings(JOURNAL_ENTRY_ID, requests))
-                .isInstanceOf(ResponseStatusException.class)
-                .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
-                        .isEqualTo(HttpStatus.BAD_REQUEST))
-                .hasMessageContaining("Postings are not balanced");
+                assertThatThrownBy(() -> postingService.createPostings(JOURNAL_ENTRY_ID, requests))
+                                .isInstanceOf(ResponseStatusException.class)
+                                .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
+                                                .isEqualTo(HttpStatus.BAD_REQUEST))
+                                .hasMessageContaining("Postings are not balanced");
 
-        verify(postingRepository, never()).saveAll(anyList());
-        verify(outboxEventService, never()).record(anyString(), anyLong(), anyString(), any());
-    }
+                verify(postingRepository, never()).saveAll(anyList());
+                verify(outboxEventService, never()).record(anyString(), anyLong(), anyString(), any());
+        }
 
-    @Test
-    void createPostings_savesBalancedPostingsAndRecordsEvent() {
-        when(journalEntryRepository.existsById(JOURNAL_ENTRY_ID)).thenReturn(true);
-        when(accountRepository.findById(1L)).thenReturn(Optional.of(account(1L, "USD")));
-        when(accountRepository.findById(2L)).thenReturn(Optional.of(account(2L, "USD")));
-        when(postingRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
-        List<PostingDto> dtos = List.of(PostingDto.builder().id(1L).build(), PostingDto.builder().id(2L).build());
-        when(postingMapper.toDtos(anyList())).thenReturn(dtos);
+        @Test
+        void createPostings_savesBalancedPostingsAndRecordsEvent() {
+                when(journalEntryRepository.existsById(JOURNAL_ENTRY_ID)).thenReturn(true);
+                when(accountRepository.findById(1L)).thenReturn(Optional.of(account(1L, "USD")));
+                when(accountRepository.findById(2L)).thenReturn(Optional.of(account(2L, "USD")));
+                when(postingRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
+                List<PostingDto> dtos = List.of(PostingDto.builder().id(1L).build(),
+                                PostingDto.builder().id(2L).build());
+                when(postingMapper.toDtos(anyList())).thenReturn(dtos);
 
-        List<PostingDto> result = postingService.createPostings(JOURNAL_ENTRY_ID, List.of(
-                new PostingRequest(1L, PostingDirection.DEBIT, 100L, "USD"),
-                new PostingRequest(2L, PostingDirection.CREDIT, 100L, "USD")));
+                List<PostingDto> result = postingService.createPostings(JOURNAL_ENTRY_ID, List.of(
+                                new PostingRequest(1L, PostingDirection.DEBIT, 100L, "USD"),
+                                new PostingRequest(2L, PostingDirection.CREDIT, 100L, "USD")));
 
-        assertThat(result).isEqualTo(dtos);
+                assertThat(result).isEqualTo(dtos);
 
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<Posting>> captor = ArgumentCaptor.forClass(List.class);
-        verify(postingRepository).saveAll(captor.capture());
-        assertThat(captor.getValue())
-                .extracting(Posting::getJournalEntryId, Posting::getAccountId, Posting::getDirection, Posting::getAmount)
-                .containsExactly(
-                        tuple(JOURNAL_ENTRY_ID, 1L, PostingDirection.DEBIT, 100L),
-                        tuple(JOURNAL_ENTRY_ID, 2L, PostingDirection.CREDIT, 100L));
+                @SuppressWarnings("unchecked")
+                ArgumentCaptor<List<Posting>> captor = ArgumentCaptor.forClass(List.class);
+                verify(postingRepository).saveAll(captor.capture());
+                assertThat(captor.getValue())
+                                .extracting(Posting::getJournalEntryId, Posting::getAccountId, Posting::getDirection,
+                                                Posting::getAmount)
+                                .containsExactly(
+                                                tuple(JOURNAL_ENTRY_ID, 1L, PostingDirection.DEBIT, 100L),
+                                                tuple(JOURNAL_ENTRY_ID, 2L, PostingDirection.CREDIT, 100L));
 
-        verify(outboxEventService).record(eq("journal_entry"), eq(JOURNAL_ENTRY_ID), eq("PostingsCreated"), eq(dtos));
-    }
+                verify(outboxEventService).record(eq("journal_entry"), eq(JOURNAL_ENTRY_ID), eq("PostingsCreated"),
+                                eq(dtos));
+        }
 
-    // TODO: Missing cases from createPostings:
-    //  - an unknown journal entry gives 404 and nothing is saved
-    //  - an unknown account gives "Account X not found"
-    //  - a posting whose currency differs from its account gives 400
-    //  - fewer than two postings gives "At least two postings are required"
-    //  - balancing is per currency: a USD debit against an EUR credit of the same amount gives 400
-    //  - getPosting for someone else's posting gives 404
-    // TODO: PostingServiceImpl still has "TODO: apply postings to account balances". When that's done, add tests that
-    //  check the balances, ideally against Postgres.
+        @Test
+        void createPostingsWithoutJournalEntry() {
+                when(journalEntryRepository.existsById(JOURNAL_ENTRY_ID)).thenReturn(false);
+
+                List<PostingRequest> requests = List.of(
+                                new PostingRequest(1L, PostingDirection.DEBIT, 100L, "USD"));
+                assertThatThrownBy(() -> postingService.createPostings(JOURNAL_ENTRY_ID, requests))
+                                .isInstanceOf(ResponseStatusException.class)
+                                .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
+                                                .isEqualTo(HttpStatus.NOT_FOUND))
+                                .hasMessageContaining("Journal entry not found");
+
+                verify(postingRepository, never()).saveAll(anyList());
+                verify(outboxEventService, never()).record(anyString(), anyLong(), anyString(), any());
+        }
+
+        @Test
+        void createPostingsWithUnknownId() {
+                when(journalEntryRepository.existsById(JOURNAL_ENTRY_ID)).thenReturn(true);
+                when(accountRepository.findById(1L)).thenReturn(Optional.of(null));
+                List<PostingRequest> requests = List.of(
+                                new PostingRequest(1L, PostingDirection.DEBIT, 100L, "USD"));
+                assertThatThrownBy(() -> postingService.createPostings(JOURNAL_ENTRY_ID, requests))
+                                .isInstanceOf(ResponseStatusException.class)
+                                .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
+                                                .isEqualTo(HttpStatus.NOT_FOUND))
+                                .hasMessageContaining("Account not found");
+
+                verify(postingRepository, never()).saveAll(anyList());
+                verify(outboxEventService, never()).record(anyString(), anyLong(), anyString(), any());
+        }
+
+        // TODO: Missing cases from createPostings:
+        // - a posting whose currency differs from its account gives 400
+        // - fewer than two postings gives "At least two postings are required"
+        // - balancing is per currency: a USD debit against an EUR credit of the same
+        // amount gives 400
+        // - getPosting for someone else's posting gives 404
+        // TODO: PostingServiceImpl still has "TODO: apply postings to account
+        // balances". When that's done, add tests that
+        // check the balances, ideally against Postgres.
 }
