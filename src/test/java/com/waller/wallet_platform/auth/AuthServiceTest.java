@@ -2,43 +2,47 @@ package com.waller.wallet_platform.auth;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 import java.time.Duration;
 import java.util.Optional;
 
-import com.waller.wallet_platform.auth.dto.RegistrationRequest;
-import com.waller.wallet_platform.auth.entity.RefreshToken;
-import com.waller.wallet_platform.user.dto.AppUserDto;
-import com.waller.wallet_platform.user.dto.AppUserRequest;
-import org.bouncycastle.openssl.PasswordException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.server.ResponseStatusException;
 
-import com.github.dockerjava.api.model.AuthResponse;
+import com.waller.wallet_platform.auth.dto.AuthResponse;
 import com.waller.wallet_platform.auth.dto.LoginRequest;
+import com.waller.wallet_platform.auth.dto.RegistrationRequest;
 import com.waller.wallet_platform.auth.service.AuthServiceImpl;
 import com.waller.wallet_platform.auth.service.RefreshTokenService;
 import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import com.waller.wallet_platform.security.AccessTokenDenylist;
 import com.waller.wallet_platform.security.JwtTokenProvider;
+import com.waller.wallet_platform.user.dto.AppUserDto;
 import com.waller.wallet_platform.user.entity.AppUser;
 import com.waller.wallet_platform.user.entity.UserRole;
 import com.waller.wallet_platform.user.mapper.AppUserMapper;
 import com.waller.wallet_platform.user.repository.AppUserRepository;
-import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
 @TestInstance(TestInstance.Lifecycle.PER_METHOD)
 public class AuthServiceTest {
+
+    private static final String EMAIL = "logintest@test.com";
+    private static final String PASSWORD = "ItIsATestPassword!1";
+    private static final String PASSWORD_HASH = "encoded-password-hash";
 
     @Mock
     private AppUserRepository appUserRepository;
@@ -72,13 +76,11 @@ public class AuthServiceTest {
 
     private RegistrationRequest registrationRequest;
 
-    private RefreshToken token;
-
     @BeforeEach
     void setUp() {
         loginRequest = LoginRequest.builder()
-                .email("logintest@test.com")
-                .password("ItIsATestPassword!1")
+                .email(EMAIL)
+                .password(PASSWORD)
                 .build();
         ReflectionTestUtils.setField(authServiceImpl, "maxFailedLogins", 5);
         ReflectionTestUtils.setField(authServiceImpl, "failedLoginWindow", Duration.ofMinutes(15));
@@ -89,70 +91,100 @@ public class AuthServiceTest {
         user.setId(1L);
         user.setRole(UserRole.USER);
         user.setName("TestUser");
-        user.setPasswordHash("ItIsATestPassword!1");
-        user.setEmail("logintest@test.com");
+        user.setPasswordHash(PASSWORD_HASH);
+        user.setEmail(EMAIL);
 
         appUserDto = AppUserDto.builder()
-                .email("logintest@test.com")
+                .id(1L)
+                .email(EMAIL)
                 .build();
 
+        // Mixed case so the service's email normalization is really tested
         registrationRequest = new RegistrationRequest();
-        registrationRequest.setEmail("logintest@test.com");
+        registrationRequest.setEmail("LoginTest@Test.com");
         registrationRequest.setName("TestUser");
-        registrationRequest.setPassword("ItIsATestPassword!1");
-        registrationRequest.setConfirmPassword("ItIsATestPassword!1");
+        registrationRequest.setPassword(PASSWORD);
+        registrationRequest.setConfirmPassword(PASSWORD);
     }
 
     @Test
     void tryLoginAndGetSuccess() {
-        when(appUserRepository.findByEmailIgnoreCase(loginRequest.getEmail())).thenReturn(Optional.of(user));
-        when(passwordEncoder.matches(loginRequest.getPassword(), user.getPasswordHash())).thenReturn(true);
+        when(appUserRepository.findByEmailIgnoreCase(EMAIL)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches(PASSWORD, PASSWORD_HASH)).thenReturn(true);
         when(appUserMapper.toDto(user)).thenReturn(appUserDto);
+        when(refreshTokenService.issue(user)).thenReturn("refresh-token");
+        when(jwtTokenProvider.generateToken(user)).thenReturn("access-token");
+
         var response = authServiceImpl.login(loginRequest);
 
-        assertNotNull(response);
         assertTrue(response.isSuccess());
-
-        verify(appUserRepository, times(1)).findByEmailIgnoreCase(loginRequest.getEmail());
-        verify(passwordEncoder, times(1)).matches(loginRequest.getPassword(), user.getPasswordHash());
-        verify(appUserMapper, times(1)).toDto(user);
-
+        AuthResponse payload = response.getPayload();
+        assertEquals("access-token", payload.accessToken());
+        assertEquals("refresh-token", payload.refreshToken());
+        assertEquals("Bearer", payload.tokenType());
+        assertEquals(900, payload.expiresIn());
+        assertEquals(appUserDto, payload.user());
     }
 
     @Test
     void whenPasswordIncorrectThenThrowException() {
-        when(appUserRepository.findByEmailIgnoreCase(loginRequest.getEmail())).thenReturn(Optional.of(user));
-        when(passwordEncoder.matches(loginRequest.getPassword(), user.getPasswordHash())).thenReturn(false);
+        when(appUserRepository.findByEmailIgnoreCase(EMAIL)).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches(PASSWORD, PASSWORD_HASH)).thenReturn(false);
 
-        assertThatThrownBy(()->authServiceImpl.login(loginRequest)).isInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining("Invalid email or password");
+        assertThatThrownBy(() -> authServiceImpl.login(loginRequest)).isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("Invalid email or password")
+                .hasFieldOrPropertyWithValue("statusCode", HttpStatus.UNAUTHORIZED);
 
-        verify(appUserRepository, times(1)).findByEmailIgnoreCase(loginRequest.getEmail());
-        verify(passwordEncoder, times(1)).matches(loginRequest.getPassword(), user.getPasswordHash());
+        verifyNoInteractions(refreshTokenService, jwtTokenProvider);
     }
 
     @Test
     void tryRegisterAndGetSuccess() {
-        when(appUserMapper.registrationToEntity(registrationRequest)).thenReturn(user);
-        when(appUserRepository.saveAndFlush(user)).thenReturn(user);
+        AppUser mapped = new AppUser();
+        mapped.setName("TestUser");
+        when(appUserMapper.registrationToEntity(registrationRequest)).thenReturn(mapped);
+        when(passwordEncoder.encode(PASSWORD)).thenReturn(PASSWORD_HASH);
+        when(appUserRepository.saveAndFlush(mapped)).thenReturn(user);
+        when(appUserMapper.toDto(user)).thenReturn(appUserDto);
+        when(refreshTokenService.issue(user)).thenReturn("refresh-token");
+        when(jwtTokenProvider.generateToken(user)).thenReturn("access-token");
+
         var result = authServiceImpl.registerUser(registrationRequest);
 
-        assertNotNull(result);
         assertTrue(result.isSuccess());
+        assertEquals("access-token", result.getPayload().accessToken());
+        assertEquals("refresh-token", result.getPayload().refreshToken());
 
-        verify(appUserMapper,times(1)).registrationToEntity(registrationRequest);
-        verify(appUserRepository,times(1)).saveAndFlush(user);
-
+        ArgumentCaptor<AppUser> saved = ArgumentCaptor.forClass(AppUser.class);
+        verify(appUserRepository).saveAndFlush(saved.capture());
+        assertEquals(EMAIL, saved.getValue().getEmail());
+        assertEquals(PASSWORD_HASH, saved.getValue().getPasswordHash());
+        verify(outboxEventService).record("user", 1L, "UserCreated", appUserDto);
     }
 
     @Test
     void tryRegisterWithExistEmailAndGetException() {
-        when(appUserMapper.registrationToEntity(registrationRequest)).thenReturn(user);
-        when(appUserRepository.saveAndFlush(user));
+        when(appUserRepository.existsByEmailIgnoreCase(EMAIL)).thenReturn(true);
 
-        assertThatThrownBy(()-> appUserRepository.saveAndFlush(user)).isInstanceOf(DataIntegrityViolationException.class)
-                .hasMessageContaining("Email is already registered");
+        assertThatThrownBy(() -> authServiceImpl.registerUser(registrationRequest))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("Email is already registered")
+                .hasFieldOrPropertyWithValue("statusCode", HttpStatus.CONFLICT);
 
-        verify(appUserMapper,times(1)).registrationToEntity(registrationRequest);
+        verify(appUserRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(outboxEventService, refreshTokenService);
+    }
+
+    @Test
+    void whenConcurrentRegistrationWinsThenThrowConflict() {
+        when(appUserMapper.registrationToEntity(registrationRequest)).thenReturn(new AppUser());
+        when(appUserRepository.saveAndFlush(any())).thenThrow(new DataIntegrityViolationException("duplicate key"));
+
+        assertThatThrownBy(() -> authServiceImpl.registerUser(registrationRequest))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("Email is already registered")
+                .hasFieldOrPropertyWithValue("statusCode", HttpStatus.CONFLICT);
+
+        verifyNoInteractions(outboxEventService, refreshTokenService);
     }
 }

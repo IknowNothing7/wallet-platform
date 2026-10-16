@@ -2,9 +2,6 @@ package com.waller.wallet_platform.user.controller;
 
 import java.util.List;
 
-import com.waller.wallet_platform.user.dto.AppUserRequest;
-import com.waller.wallet_platform.user.mapper.AppUserMapper;
-import io.restassured.http.ContentType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,15 +13,21 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import com.waller.wallet_platform.security.JwtTokenProvider;
+import com.waller.wallet_platform.user.dto.AppUserRequest;
 import com.waller.wallet_platform.user.entity.AppUser;
 import com.waller.wallet_platform.user.entity.UserRole;
 import com.waller.wallet_platform.user.repository.AppUserRepository;
 
 import io.restassured.RestAssured;
+import io.restassured.http.ContentType;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasKey;
+import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.not;
 import static com.waller.wallet_platform.support.TestData.user;
-import static org.hamcrest.Matchers.*;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Testcontainers
@@ -42,10 +45,6 @@ class UserControllerTest {
 
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
-
-
-    @Autowired
-    private AppUserMapper mapper;
 
     @BeforeEach
     void setUp() {
@@ -94,44 +93,44 @@ class UserControllerTest {
     }
 
     @Test
-    void createUserAndNoPasswordInResponse() {
-        AppUser admin = appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
-        AppUserRequest request = new AppUserRequest();
-        request.setName("newUser");
-        request.setPassword("passsworD!11");
-        request.setEmail("newOne@email.com");
-
-                given()
-                        .contentType(ContentType.JSON)
-                        .body(request)
-                        .auth().oauth2(jwtTokenProvider.generateToken(admin))
-                        .when()
-                        .post("/create")
-                        .then()
-                        .body("success", equalTo(true))
-                        .body("payload.name", equalTo(request.getName()))
-                        .body("payload.email", equalTo(request.getEmail()))
-                        .body("payload.password",empty())
-                        .statusCode(200)
-                        .body("payload.content.password",empty());
-    }
-
-    @Test
-    void duplicateEmailIsForbidden() {
-        AppUser admin = appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
-        AppUserRequest request2 = new AppUserRequest();
-        request2.setEmail("admin@email.com");
-        request2.setPassword("!Password!11");
-        request2.setName("Robin");
+    void createUserReturnsCreatedWithoutPassword() {
+        AppUserRequest request = AppUserRequest.builder()
+                .name("newUser")
+                .email("newOne@email.com")
+                .password("passsworD!11")
+                .build();
 
         given()
                 .contentType(ContentType.JSON)
-                .body(request2)
-                .auth().oauth2(jwtTokenProvider.generateToken(admin))
-                .when()
-                .post("/create")
-                .then()
-                .statusCode(409);}
+                .body(request)
+        .when()
+                .post("/user/create")
+        .then()
+                .statusCode(201)
+                .body("success", equalTo(true))
+                .body("payload.name", equalTo("newUser"))
+                .body("payload.email", equalTo("newone@email.com"))
+                .body("payload", not(hasKey("password")))
+                .body("payload", not(hasKey("passwordHash")));
+    }
+
+    @Test
+    void duplicateEmailInDifferentCaseIsConflict() {
+        appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
+        AppUserRequest request = AppUserRequest.builder()
+                .name("Robin")
+                .email("ADMIN@email.com")
+                .password("!Password!11")
+                .build();
+
+        given()
+                .contentType(ContentType.JSON)
+                .body(request)
+        .when()
+                .post("/user/create")
+        .then()
+                .statusCode(409);
+    }
 
     // TODO: Missing endpoint tests:
     //  - GET /user paging (page/size) and @Max(100) on size give 400 with the parameter name.
