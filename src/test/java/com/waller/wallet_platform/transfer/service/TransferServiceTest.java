@@ -90,7 +90,6 @@ class TransferServiceTest {
         TransferDto result = transferService.createTransfer(request);
 
         assertThat(result).isEqualTo(dto);
-        // The mapper only knows the ids; the service must swap in the loaded accounts
         assertThat(saved.getFromAccount()).isSameAs(from);
         assertThat(saved.getToAccount()).isSameAs(to);
         verify(outboxEventService).record("transfer", 10L, "TransferCreated", dto);
@@ -124,8 +123,20 @@ class TransferServiceTest {
         verifyNoInteractions(outboxEventService);
     }
 
-    // TODO: Missing: an unknown destination account. Its message currently names the source id
-    //  (TransferServiceImpl.java:292); fix that first, then assert "Account 2 not found".
+@Test
+void createTransfer_unknownDestinationAccount_throwsNotFoundAndSavesNothing() {
+    when(accountRepository.findUserAccountById(1L)).thenReturn(Optional.of(from));
+    when(accountRepository.findUserAccountById(2L)).thenReturn(Optional.empty());
+
+    assertThatThrownBy(() -> transferService.createTransfer(request))
+            .isInstanceOfSatisfying(ResponseStatusException.class,
+                    e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND))
+            .hasMessageContaining("Account 2 not found");
+
+    verify(transferRepository, never()).saveAndFlush(any());
+    verifyNoInteractions(outboxEventService);
+}
+
     @Test
     void getTransfer_visibleToOwnerOfReceivingAccount() {
         Transfer transfer = new Transfer();
