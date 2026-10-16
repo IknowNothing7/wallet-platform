@@ -1,5 +1,6 @@
 package com.waller.wallet_platform.ledger.service;
 
+import com.waller.wallet_platform.account.entity.Account;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -114,7 +115,9 @@ public class PostingServiceTest {
                 when(journalEntryRepository.existsById(JOURNAL_ENTRY_ID)).thenReturn(false);
 
                 List<PostingRequest> requests = List.of(
-                                new PostingRequest(1L, PostingDirection.DEBIT, 100L, "USD"));
+                        new PostingRequest(1L, PostingDirection.DEBIT, 100L, "USD"),
+                        new PostingRequest(2L, PostingDirection.CREDIT, 100L, "USD"));
+
                 assertThatThrownBy(() -> postingService.createPostings(JOURNAL_ENTRY_ID, requests))
                                 .isInstanceOf(ResponseStatusException.class)
                                 .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
@@ -126,24 +129,65 @@ public class PostingServiceTest {
         }
 
         @Test
-        void createPostingsWithUnknownId() {
+        void createPostingsWithUnknownAccountId() {
                 when(journalEntryRepository.existsById(JOURNAL_ENTRY_ID)).thenReturn(true);
-                when(accountRepository.findById(1L)).thenReturn(Optional.of(null));
+                when(accountRepository.findById(1L)).thenReturn(Optional.empty());
                 List<PostingRequest> requests = List.of(
-                                new PostingRequest(1L, PostingDirection.DEBIT, 100L, "USD"));
+                        new PostingRequest(1L, PostingDirection.DEBIT, 100L, "USD"),
+                        new PostingRequest(2L, PostingDirection.CREDIT, 100L, "USD"));
+
+
                 assertThatThrownBy(() -> postingService.createPostings(JOURNAL_ENTRY_ID, requests))
                                 .isInstanceOf(ResponseStatusException.class)
                                 .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
                                                 .isEqualTo(HttpStatus.NOT_FOUND))
-                                .hasMessageContaining("Account not found");
+                                .hasMessageContaining("Account " +1+ " not found");
 
                 verify(postingRepository, never()).saveAll(anyList());
                 verify(outboxEventService, never()).record(anyString(), anyLong(), anyString(), any());
         }
 
+
+    @Test
+    void createPostingsWithDifferentCurrency() {
+            Account account = account(1L,"USD");
+        when(journalEntryRepository.existsById(JOURNAL_ENTRY_ID)).thenReturn(true);
+        when(accountRepository.findById(1L)).thenReturn(Optional.of(account));
+
+        List<PostingRequest> requests = List.of(
+                new PostingRequest(1L, PostingDirection.DEBIT, 100L, "ES"),
+                new PostingRequest(2L, PostingDirection.CREDIT, 100L, "ES"));
+
+        assertThatThrownBy(() -> postingService.createPostings(JOURNAL_ENTRY_ID, requests))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
+                        .isEqualTo(HttpStatus.BAD_REQUEST))
+                .hasMessageContaining("Posting currency does not match account " + account.getId() + " currency");
+
+        verify(postingRepository, never()).saveAll(anyList());
+        verify(outboxEventService, never()).record(anyString(), anyLong(), anyString(), any());
+    }
+
+    @Test
+    void createOnlyOnePosting() {
+        Account account = account(1L,"USD");
+        when(journalEntryRepository.existsById(JOURNAL_ENTRY_ID)).thenReturn(true);
+        when(accountRepository.findById(1L)).thenReturn(Optional.of(account));
+
+        List<PostingRequest> requests = List.of(
+                new PostingRequest(1L, PostingDirection.DEBIT, 100L, "USD"));
+
+        assertThatThrownBy(() -> postingService.createPostings(JOURNAL_ENTRY_ID, requests))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
+                        .isEqualTo(HttpStatus.BAD_REQUEST))
+                .hasMessageContaining("At least two postings are required");
+
+        verify(postingRepository, never()).saveAll(anyList());
+        verify(outboxEventService, never()).record(anyString(), anyLong(), anyString(), any());
+    }
+
         // TODO: Missing cases from createPostings:
-        // - a posting whose currency differs from its account gives 400
-        // - fewer than two postings gives "At least two postings are required"
         // - balancing is per currency: a USD debit against an EUR credit of the same
         // amount gives 400
         // - getPosting for someone else's posting gives 404
