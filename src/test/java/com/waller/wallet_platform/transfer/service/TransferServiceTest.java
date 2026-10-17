@@ -82,6 +82,7 @@ class TransferServiceTest {
                 .status(TransferStatus.PENDING).build();
 
         when(accountRepository.findUserAccountById(1L)).thenReturn(Optional.of(from));
+        when(accountAccessChecker.canAccess(1L)).thenReturn(true);
         when(accountRepository.findUserAccountById(2L)).thenReturn(Optional.of(to));
         when(transferMapper.requestToEntity(request)).thenReturn(mapped);
         when(transferRepository.saveAndFlush(mapped)).thenReturn(saved);
@@ -112,6 +113,7 @@ class TransferServiceTest {
     void createTransfer_currencyMismatch_throwsBadRequestAndSavesNothing() {
         Account eurAccount = account(2L, "EUR");
         when(accountRepository.findUserAccountById(1L)).thenReturn(Optional.of(from));
+        when(accountAccessChecker.canAccess(1L)).thenReturn(true);
         when(accountRepository.findUserAccountById(2L)).thenReturn(Optional.of(eurAccount));
 
         assertThatThrownBy(() -> transferService.createTransfer(request))
@@ -123,19 +125,65 @@ class TransferServiceTest {
         verifyNoInteractions(outboxEventService);
     }
 
-@Test
-void createTransfer_unknownDestinationAccount_throwsNotFoundAndSavesNothing() {
-    when(accountRepository.findUserAccountById(1L)).thenReturn(Optional.of(from));
-    when(accountRepository.findUserAccountById(2L)).thenReturn(Optional.empty());
+    @Test
+    void createTransfer_unknownDestinationAccount_throwsNotFoundAndSavesNothing() {
+        when(accountRepository.findUserAccountById(1L)).thenReturn(Optional.of(from));
+        when(accountAccessChecker.canAccess(1L)).thenReturn(true);
+        when(accountRepository.findUserAccountById(2L)).thenReturn(Optional.empty());
 
-    assertThatThrownBy(() -> transferService.createTransfer(request))
-            .isInstanceOfSatisfying(ResponseStatusException.class,
-                    e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND))
-            .hasMessageContaining("Account 2 not found");
+        assertThatThrownBy(() -> transferService.createTransfer(request))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND))
+                .hasMessageContaining("Account 2 not found");
 
-    verify(transferRepository, never()).saveAndFlush(any());
-    verifyNoInteractions(outboxEventService);
-}
+        verify(transferRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(outboxEventService);
+    }
+
+    @Test
+    void createTransfer_sourceAccountOfAnotherUser_answersLikeMissingAccount() {
+        when(accountRepository.findUserAccountById(1L)).thenReturn(Optional.of(from));
+        when(accountAccessChecker.canAccess(1L)).thenReturn(false);
+
+        assertThatThrownBy(() -> transferService.createTransfer(request))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND))
+                .hasMessageContaining("Account 1 not found");
+
+        verify(transferRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(outboxEventService);
+    }
+
+    @Test
+    void createTransfer_requestCurrencyDiffersFromAccounts_throwsBadRequestAndSavesNothing() {
+        TransferRequest eurRequest = new TransferRequest(1L, 2L, 100L, "EUR");
+        when(accountRepository.findUserAccountById(1L)).thenReturn(Optional.of(from));
+        when(accountAccessChecker.canAccess(1L)).thenReturn(true);
+        when(accountRepository.findUserAccountById(2L)).thenReturn(Optional.of(to));
+
+        assertThatThrownBy(() -> transferService.createTransfer(eurRequest))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST))
+                .hasMessageContaining("USD");
+
+        verify(transferRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(outboxEventService);
+    }
+
+    @Test
+    void createTransfer_toSameAccount_throwsBadRequestAndSavesNothing() {
+        TransferRequest selfRequest = new TransferRequest(1L, 1L, 100L, "USD");
+        when(accountRepository.findUserAccountById(1L)).thenReturn(Optional.of(from));
+        when(accountAccessChecker.canAccess(1L)).thenReturn(true);
+
+        assertThatThrownBy(() -> transferService.createTransfer(selfRequest))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST))
+                .hasMessageContaining("same account");
+
+        verify(transferRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(outboxEventService);
+    }
 
     @Test
     void getTransfer_visibleToOwnerOfReceivingAccount() {

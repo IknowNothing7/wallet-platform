@@ -83,8 +83,11 @@ public class PostingServiceTest {
         @Test
         void createPostings_savesBalancedPostingsAndRecordsEvent() {
                 when(journalEntryRepository.existsById(JOURNAL_ENTRY_ID)).thenReturn(true);
-                when(accountRepository.findById(1L)).thenReturn(Optional.of(account(1L, "USD")));
-                when(accountRepository.findById(2L)).thenReturn(Optional.of(account(2L, "USD")));
+                Account debited = account(1L, "USD");
+                debited.setBalance(500L);
+                Account credited = account(2L, "USD");
+                when(accountRepository.findById(1L)).thenReturn(Optional.of(debited));
+                when(accountRepository.findById(2L)).thenReturn(Optional.of(credited));
                 when(postingRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
                 List<PostingDto> dtos = List.of(PostingDto.builder().id(1L).build(),
                                 PostingDto.builder().id(2L).build());
@@ -108,6 +111,9 @@ public class PostingServiceTest {
 
                 verify(outboxEventService).record(eq("journal_entry"), eq(JOURNAL_ENTRY_ID), eq("PostingsCreated"),
                                 eq(dtos));
+
+                assertThat(debited.getBalance()).isEqualTo(400L);
+                assertThat(credited.getBalance()).isEqualTo(100L);
         }
 
         @Test
@@ -141,7 +147,7 @@ public class PostingServiceTest {
                                 .isInstanceOf(ResponseStatusException.class)
                                 .satisfies(e -> assertThat(((ResponseStatusException) e).getStatusCode())
                                                 .isEqualTo(HttpStatus.NOT_FOUND))
-                                .hasMessageContaining("Account " +1+ " not found");
+                                .hasMessageContaining("Account 1 not found");
 
                 verify(postingRepository, never()).saveAll(anyList());
                 verify(outboxEventService, never()).record(anyString(), anyLong(), anyString(), any());
@@ -215,7 +221,4 @@ public class PostingServiceTest {
                         .isEqualTo(HttpStatus.NOT_FOUND))
                 .hasMessageContaining("Posting not found");
     }
-        // TODO: PostingServiceImpl still has "TODO: apply postings to account
-        // balances". When that's done, add tests that
-        // check the balances, ideally against Postgres.
 }

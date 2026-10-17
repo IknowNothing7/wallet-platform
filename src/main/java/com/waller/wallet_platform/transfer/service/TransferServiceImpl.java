@@ -65,6 +65,11 @@ public class TransferServiceImpl implements TransferService {
                     "Transfer currency does not match  the target account currency " + accountTo.getCurrency());
         }
 
+        if (!accountFrom.getCurrency().equals(request.getCurrency())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Transfer currency does not match the account currency " + accountFrom.getCurrency());
+        }
+
         if(Objects.equals(accountFrom.getId(), accountTo.getId())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "You can not transfer to the same account");

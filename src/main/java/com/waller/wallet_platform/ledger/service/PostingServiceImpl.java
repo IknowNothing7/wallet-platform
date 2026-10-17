@@ -61,7 +61,9 @@ public class PostingServiceImpl implements PostingService {
             posting.setDirection(r.getDirection());
             posting.setAmount(r.getAmount());
             posting.setCurrency(r.getCurrency());
-            account.setBalance(account.getBalance()+posting.getAmount());
+            // A credit moves money into the account, a debit moves it out
+            long delta = r.getDirection() == PostingDirection.CREDIT ? r.getAmount() : -r.getAmount();
+            account.setBalance(account.getBalance() + delta);
             return posting;
         }).toList();
 

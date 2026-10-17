@@ -190,9 +190,6 @@ class TransferControllerTest {
                 .body("payload.totalElements", equalTo(2));
     }
 
-    // TODO: Add these once createTransfer is fixed:
-    //    a transfer from someone else's account.
-    //  - An unknown destination account gives a 404 naming that account; the message currently uses the source id.
     @Test
     void anonymousIsUnauthorized() {
         given()
@@ -203,41 +200,79 @@ class TransferControllerTest {
     }
 
     @Test
-    void userDoesntOwnAccount() {
-        long accountId= 132343213L;
+    void createTransfer_unknownSourceAccount_returns404() {
+        long unknownId = 132343213L;
         given()
                 .auth().oauth2(jwtTokenProvider.generateToken(alice))
                 .contentType(ContentType.JSON)
-                .body(transferBody(accountId, bobUsd.getId(), 250, "USD"))
-                .when()
+                .body(transferBody(unknownId, bobUsd.getId(), 250, "USD"))
+        .when()
                 .post("/transfer/create")
-                .then()
+        .then()
                 .statusCode(404)
-                .body("message", equalTo("Account " + accountId + " not found"));
+                .body("message", equalTo("Account " + unknownId + " not found"));
     }
 
     @Test
-    void transferFromTheSameAccountAsTarget() {
+    void createTransfer_fromSomeoneElsesAccount_returns404AndWritesNothing() {
         given()
                 .auth().oauth2(jwtTokenProvider.generateToken(alice))
                 .contentType(ContentType.JSON)
-                .body(transferBody(alice.getId(), alice.getId(), 250, "USD"))
-                .when()
+                .body(transferBody(bobUsd.getId(), aliceUsd.getId(), 250, "USD"))
+        .when()
                 .post("/transfer/create")
-                .then()
-                .statusCode(400);
+        .then()
+                .statusCode(404)
+                .body("message", equalTo("Account " + bobUsd.getId() + " not found"));
+
+        assertThat(transferRepository.count()).isZero();
+        assertThat(outboxRepository.count()).isZero();
     }
 
     @Test
-    void transferWithDifferentCurrency() {
+    void createTransfer_unknownDestinationAccount_returns404NamingThatAccount() {
+        long unknownId = 132343213L;
         given()
                 .auth().oauth2(jwtTokenProvider.generateToken(alice))
                 .contentType(ContentType.JSON)
-                .body(transferBody(alice.getId(), bobUsd.getId(), 250, "ES"))
-                .when()
+                .body(transferBody(aliceUsd.getId(), unknownId, 250, "USD"))
+        .when()
                 .post("/transfer/create")
-                .then()
-                .statusCode(400);
+        .then()
+                .statusCode(404)
+                .body("message", equalTo("Account " + unknownId + " not found"));
+    }
+
+    @Test
+    void createTransfer_toSameAccount_returns400AndWritesNothing() {
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(alice))
+                .contentType(ContentType.JSON)
+                .body(transferBody(aliceUsd.getId(), aliceUsd.getId(), 250, "USD"))
+        .when()
+                .post("/transfer/create")
+        .then()
+                .statusCode(400)
+                .body("message", equalTo("You can not transfer to the same account"));
+
+        assertThat(transferRepository.count()).isZero();
+        assertThat(outboxRepository.count()).isZero();
+    }
+
+    @Test
+    void createTransfer_requestCurrencyDiffersFromAccounts_returns400AndWritesNothing() {
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(alice))
+                .contentType(ContentType.JSON)
+                .body(transferBody(aliceUsd.getId(), bobUsd.getId(), 250, "EUR"))
+        .when()
+                .post("/transfer/create")
+        .then()
+                .statusCode(400)
+                .body("success", equalTo(false));
+
+        assertThat(transferRepository.count()).isZero();
+        assertThat(outboxRepository.count()).isZero();
     }
 
     private static Map<String, Object> transferBody(Long from, Long to, long amount, String currency) {
