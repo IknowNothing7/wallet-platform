@@ -18,6 +18,8 @@ import com.waller.wallet_platform.transfer.repository.TransferRepository;
 import com.waller.wallet_platform.transfer.dto.TransferRequest;
 import com.waller.wallet_platform.transfer.entity.Transfer;
 
+import java.util.Objects;
+
 @Service
 @Slf4j
 @RequiredArgsConstructor
@@ -34,11 +36,11 @@ public class TransferServiceImpl implements TransferService {
     private final AccountRepository accountRepository;
     private final OutboxEventService outboxEventService;
 
-
     @Override
     @Transactional(readOnly = true)
     public TransferDto getTransfer(Long id) {
-        // Visible to the owner of either side; anyone else gets the same 404 as for a missing transfer
+        // Visible to the owner of either side; anyone else gets the same 404 as for a
+        // missing transfer
         Transfer transfer = transferRepository.findWithAccountsById(id)
                 .filter(t -> accountAccessChecker.canAccess(t.getFromAccount())
                         || accountAccessChecker.canAccess(t.getToAccount()))
@@ -50,16 +52,27 @@ public class TransferServiceImpl implements TransferService {
     @Transactional
     public TransferDto createTransfer(TransferRequest request) {
         Account accountFrom = accountRepository.findUserAccountById(request.getIdFromAccount())
-                .orElseThrow(()-> new ResponseStatusException(HttpStatus.NOT_FOUND,
-        "Account " + request.getIdFromAccount() + " not found"));
+                .filter(t->accountAccessChecker.canAccess(request.getIdFromAccount()))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "Account " + request.getIdFromAccount() + " not found"));
 
         Account accountTo = accountRepository.findUserAccountById(request.getIdToAccount())
-                .orElseThrow(()-> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "Account " + request.getIdFromAccount() + " not found"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "Account " + request.getIdToAccount() + " not found"));
 
         if (!accountFrom.getCurrency().equals(accountTo.getCurrency())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Transfer currency does not match  the target account currency " + accountTo.getCurrency());
+        }
+
+        if (!accountFrom.getCurrency().equals(request.getCurrency())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Transfer currency does not match the account currency " + accountFrom.getCurrency());
+        }
+
+        if(Objects.equals(accountFrom.getId(), accountTo.getId())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "You can not transfer to the same account");
         }
 
         Transfer transfer = transferRepository.saveAndFlush(transferMapper.requestToEntity(request));
