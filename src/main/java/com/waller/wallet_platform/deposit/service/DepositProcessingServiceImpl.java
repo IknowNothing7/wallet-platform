@@ -15,6 +15,7 @@ import com.waller.wallet_platform.account.entity.Account;
 import com.waller.wallet_platform.account.entity.SystemAccountKind;
 import com.waller.wallet_platform.account.service.SystemAccountService;
 import com.waller.wallet_platform.bank.client.BankClient;
+import com.waller.wallet_platform.bank.client.BankRejectedException;
 import com.waller.wallet_platform.bank.dto.BankPayment;
 import com.waller.wallet_platform.bank.dto.BankPaymentRequest;
 import com.waller.wallet_platform.bank.dto.BankPaymentResult;
@@ -40,12 +41,10 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
 
     private static final String DEPOSIT_NOT_FOUND = "Deposit not found";
     private static final String AGGREGATE_TYPE = "deposit";
-    // TODO: Add contracts/events/DepositSucceeded|DepositFailed|DepositExpired.v1.schema.json and the README table rows
     private static final String DEPOSIT_SUCCEEDED = "DepositSucceeded";
     private static final String DEPOSIT_FAILED = "DepositFailed";
     private static final String DEPOSIT_EXPIRED = "DepositExpired";
     private static final String IDEMPOTENCY_PREFIX = "deposit-";
-    // 2%, rounded down in the user's favour
     private static final long FEE_BASIS_POINTS = 200;
 
     private final DepositRepository depositRepository;
@@ -66,9 +65,22 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
         if (deposit.getStatus() != DepositStatus.PENDING) {
             return depositMapper.toDto(deposit);
         }
-        BankPayment payment = bankClient.createPayment(
-                IDEMPOTENCY_PREFIX + deposit.getId(),
-                new BankPaymentRequest(deposit.getAmount(), deposit.getCurrency(), String.valueOf(deposit.getId())));
+        BankPayment payment;
+        try {
+            payment = bankClient.createPayment(
+                    IDEMPOTENCY_PREFIX + deposit.getId(),
+                    new BankPaymentRequest(deposit.getAmount(), deposit.getCurrency(), String.valueOf(deposit.getId())));
+        } catch (BankRejectedException e) {
+            // Resubmitting the same request can't succeed, so fail it now instead of letting it expire.
+            // 5xx and timeouts propagate: the outcome is unknown, it stays PENDING and reconciliation resubmits.
+            return transactionTemplate.execute(status -> {
+                Deposit locked = lockDeposit(depositId);
+                if (locked.getStatus() == DepositStatus.PENDING) {
+                    fail(locked, rejectionReason(e));
+                }
+                return depositMapper.toDto(locked);
+            });
+        }
         log.info("Deposit {} submitted to bank as {}", deposit.getId(), payment.reference());
 
         return transactionTemplate.execute(status -> {
@@ -87,7 +99,6 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
             log.error("Bank result {} names an invalid deposit id {}", result.reference(), result.walletDepositId());
             return;
         }
-        // Locked so a webhook, its duplicate and a reconciliation run can't settle the same deposit twice
         Deposit deposit = depositRepository.findByIdForUpdate(depositId).orElse(null);
         if (deposit == null) {
             // 2xx anyway: a retry would hit the same missing row. This means money with no deposit.
@@ -186,6 +197,12 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
         deposit.setFailureReason(reason);
         transitioned(deposit, DEPOSIT_FAILED);
         log.info("Deposit {} failed: {}", deposit.getId(), reason);
+    }
+
+    // failure_reason is VARCHAR(255)
+    private static String rejectionReason(BankRejectedException e) {
+        String reason = "Rejected by bank (" + e.getStatus().value() + "): " + e.getResponseBody();
+        return reason.length() <= 255 ? reason : reason.substring(0, 255);
     }
 
     // A null reference is allowed: the webhook can arrive before submitToBank has stored it

@@ -9,35 +9,19 @@ import static com.waller.wallet_platform.support.TestData.user;
 
 import java.util.List;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import com.waller.wallet_platform.account.repository.AccountRepository;
 import com.waller.wallet_platform.security.JwtTokenProvider;
 import com.waller.wallet_platform.user.entity.AppUser;
 import com.waller.wallet_platform.user.entity.UserRole;
 import com.waller.wallet_platform.user.repository.AppUserRepository;
+import com.waller.wallet_platform.support.IntegrationTest;
 
 import io.restassured.RestAssured;
 
-import org.testcontainers.junit.jupiter.Container;
-
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Testcontainers 
-public class AccountControllerTest {
-
-    @Container 
-    @ServiceConnection 
-    static PostgreSQLContainer postgresql = new PostgreSQLContainer("postgres:17-alpine");
-
-    @LocalServerPort 
-    private Integer port;
+public class AccountControllerTest extends IntegrationTest {
 
     @Autowired 
     private AccountRepository accountRepository;
@@ -47,14 +31,6 @@ public class AccountControllerTest {
 
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
-
-
-    @BeforeEach void setUp() {
-        RestAssured.port=port;
-        accountRepository.deleteAll();
-        // TODO: Users are never deleted. The next test that saves "admin@email.com" will fail on the unique email,
-        //  so also call appUserRepository.deleteAll() here, after accounts.
-    }
 
     @Test 
     void getAllAccounts() {

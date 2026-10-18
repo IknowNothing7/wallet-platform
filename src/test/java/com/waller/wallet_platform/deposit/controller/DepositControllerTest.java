@@ -1,14 +1,7 @@
 package com.waller.wallet_platform.deposit.controller;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
 import static com.waller.wallet_platform.support.TestData.account;
 import static com.waller.wallet_platform.support.TestData.testDeposit;
 import static com.waller.wallet_platform.support.TestData.user;
@@ -27,20 +20,11 @@ import com.waller.wallet_platform.security.JwtTokenProvider;
 import com.waller.wallet_platform.user.entity.AppUser;
 import com.waller.wallet_platform.user.entity.UserRole;
 import com.waller.wallet_platform.user.repository.AppUserRepository;
+import com.waller.wallet_platform.support.IntegrationTest;
 
 import io.restassured.RestAssured;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Testcontainers
-public class DepositControllerTest {
-
-    @Container
-    @ServiceConnection
-    // TODO: The other container tests use `static PostgreSQLContainer postgresql`; pick one name and drop `private`.
-    private static PostgreSQLContainer pSqlContainer = new PostgreSQLContainer("postgres:17-alpine");
-
-    @LocalServerPort
-    private Integer port;
+public class DepositControllerTest extends IntegrationTest {
 
     @Autowired
     DepositRepository depositRepository;
@@ -53,14 +37,6 @@ public class DepositControllerTest {
 
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
-
-    @BeforeEach
-    void setUp() {
-        RestAssured.port=port;
-        depositRepository.deleteAll();
-        accountRepository.deleteAll();
-        appUserRepository.deleteAll();
-    }
 
     @Test
     void getAccountDeposits() {

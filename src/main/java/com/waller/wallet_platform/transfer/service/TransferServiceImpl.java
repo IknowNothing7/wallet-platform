@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import com.waller.wallet_platform.common.idempotency.IdempotencyService;
 import com.waller.wallet_platform.common.web.PageResponse;
 import com.waller.wallet_platform.security.AccountAccessChecker;
 import com.waller.wallet_platform.outbox.service.OutboxEventService;
@@ -19,6 +20,7 @@ import com.waller.wallet_platform.transfer.dto.TransferRequest;
 import com.waller.wallet_platform.transfer.entity.Transfer;
 
 import java.util.Objects;
+import java.util.Optional;
 
 @Service
 @Slf4j
@@ -29,12 +31,14 @@ public class TransferServiceImpl implements TransferService {
     private static final String ACCOUNT_NOT_FOUND = "Account not found";
     private static final String AGGREGATE_TYPE = "transfer";
     private static final String TRANSFER_CREATED = "TransferCreated";
+    private static final String CREATE_ENDPOINT = "POST /transfer/create";
 
     private final TransferRepository transferRepository;
     private final TransferMapper transferMapper;
     private final AccountAccessChecker accountAccessChecker;
     private final AccountRepository accountRepository;
     private final OutboxEventService outboxEventService;
+    private final IdempotencyService idempotencyService;
 
     @Override
     @Transactional(readOnly = true)
@@ -50,7 +54,16 @@ public class TransferServiceImpl implements TransferService {
 
     @Override
     @Transactional
-    public TransferDto createTransfer(TransferRequest request) {
+    public TransferDto createTransfer(TransferRequest request, String idempotencyKey) {
+        if (idempotencyKey != null) {
+            Optional<TransferDto> previous = idempotencyService.findResponse(
+                    idempotencyKey, CREATE_ENDPOINT, request, TransferDto.class);
+            if (previous.isPresent()) {
+                log.info("Transfer {} returned again for a repeated Idempotency-Key", previous.get().id());
+                return previous.get();
+            }
+        }
+
         Account accountFrom = accountRepository.findUserAccountById(request.getIdFromAccount())
                 .filter(t->accountAccessChecker.canAccess(request.getIdFromAccount()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
@@ -82,6 +95,9 @@ public class TransferServiceImpl implements TransferService {
 
         TransferDto dto = transferMapper.toDto(transfer);
         outboxEventService.record(AGGREGATE_TYPE, transfer.getId(), TRANSFER_CREATED, dto);
+        if (idempotencyKey != null) {
+            idempotencyService.save(idempotencyKey, CREATE_ENDPOINT, request, HttpStatus.CREATED, dto);
+        }
         return dto;
 
     }

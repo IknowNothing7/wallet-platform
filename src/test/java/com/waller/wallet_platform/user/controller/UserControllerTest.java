@@ -2,21 +2,15 @@ package com.waller.wallet_platform.user.controller;
 
 import java.util.List;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import com.waller.wallet_platform.security.JwtTokenProvider;
 import com.waller.wallet_platform.user.dto.AppUserRequest;
 import com.waller.wallet_platform.user.entity.AppUser;
 import com.waller.wallet_platform.user.entity.UserRole;
 import com.waller.wallet_platform.user.repository.AppUserRepository;
+import com.waller.wallet_platform.support.IntegrationTest;
 
 import io.restassured.RestAssured;
 import io.restassured.http.ContentType;
@@ -29,28 +23,13 @@ import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.not;
 import static com.waller.wallet_platform.support.TestData.user;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Testcontainers
-class UserControllerTest {
-
-    @Container
-    @ServiceConnection
-    static PostgreSQLContainer postgresql = new PostgreSQLContainer("postgres:17-alpine");
-
-    @LocalServerPort
-    private Integer port;
+class UserControllerTest extends IntegrationTest {
 
     @Autowired
     private AppUserRepository appUserRepository;
 
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
-
-    @BeforeEach
-    void setUp() {
-        RestAssured.port = port;
-        appUserRepository.deleteAll();
-    }
 
     @Test
     void adminGetsAllUsers() {

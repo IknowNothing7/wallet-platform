@@ -54,8 +54,9 @@ public class IdempotencyKey implements Serializable {
     @Column(name = "endpoint", nullable = false, length = 255)
     private String endpoint;
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "request_hash", nullable = false, length = 64)
-    private char requestHash;
+    private String requestHash;
 
     @Column(name = "response_status")
     private Integer responseStatus;

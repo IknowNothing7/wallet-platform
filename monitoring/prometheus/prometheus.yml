@@ -6,7 +6,8 @@ rule_files:
   - /etc/prometheus/alerts.yml
 
 scrape_configs:
-  # wallet-platform runs on the host (./gradlew bootRun), not in compose; host.docker.internal is mapped in compose.yaml
+  # Reaches wallet-platform through the host's port 8080, whether it runs via ./gradlew bootRun or the compose `app`
+  # profile; host.docker.internal is mapped in compose.yaml
   - job_name: wallet-platform
     metrics_path: /actuator/prometheus
     static_configs:

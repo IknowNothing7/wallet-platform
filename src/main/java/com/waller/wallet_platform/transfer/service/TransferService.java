@@ -8,7 +8,8 @@ public interface TransferService {
 
     TransferDto getTransfer(Long id);
 
-    TransferDto createTransfer(TransferRequest request);
+    /** With an idempotency key, a retry returns the transfer created by the first request; the key may be null. */
+    TransferDto createTransfer(TransferRequest request, String idempotencyKey);
 
     /** Incoming and outgoing transfers of the account, newest first. */
     PageResponse<TransferDto> getAccountTransfers(Long accountId, int page, int size);

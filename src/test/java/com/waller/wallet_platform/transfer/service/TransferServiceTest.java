@@ -26,6 +26,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import com.waller.wallet_platform.account.entity.Account;
 import com.waller.wallet_platform.account.repository.AccountRepository;
+import com.waller.wallet_platform.common.idempotency.IdempotencyService;
 import com.waller.wallet_platform.common.web.PageResponse;
 import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import com.waller.wallet_platform.security.AccountAccessChecker;
@@ -53,6 +54,9 @@ class TransferServiceTest {
 
     @Mock
     private OutboxEventService outboxEventService;
+
+    @Mock
+    private IdempotencyService idempotencyService;
 
     @InjectMocks
     private TransferServiceImpl transferService;
@@ -88,7 +92,7 @@ class TransferServiceTest {
         when(transferRepository.saveAndFlush(mapped)).thenReturn(saved);
         when(transferMapper.toDto(saved)).thenReturn(dto);
 
-        TransferDto result = transferService.createTransfer(request);
+        TransferDto result = transferService.createTransfer(request, null);
 
         assertThat(result).isEqualTo(dto);
         assertThat(saved.getFromAccount()).isSameAs(from);
@@ -97,10 +101,45 @@ class TransferServiceTest {
     }
 
     @Test
+    void createTransfer_repeatedIdempotencyKey_returnsStoredTransferAndCreatesNothing() {
+        TransferDto previous = TransferDto.builder().id(10L).status(TransferStatus.PENDING).build();
+        when(idempotencyService.findResponse("key-1", "POST /transfer/create", request, TransferDto.class))
+                .thenReturn(Optional.of(previous));
+
+        TransferDto result = transferService.createTransfer(request, "key-1");
+
+        assertThat(result).isSameAs(previous);
+        verifyNoInteractions(accountRepository, transferRepository, outboxEventService);
+        verify(idempotencyService, never()).save(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void createTransfer_newIdempotencyKey_storesTheResponse() {
+        Transfer mapped = new Transfer();
+        Transfer saved = new Transfer();
+        saved.setId(10L);
+        TransferDto dto = TransferDto.builder().id(10L).status(TransferStatus.PENDING).build();
+
+        when(idempotencyService.findResponse("key-1", "POST /transfer/create", request, TransferDto.class))
+                .thenReturn(Optional.empty());
+        when(accountRepository.findUserAccountById(1L)).thenReturn(Optional.of(from));
+        when(accountAccessChecker.canAccess(1L)).thenReturn(true);
+        when(accountRepository.findUserAccountById(2L)).thenReturn(Optional.of(to));
+        when(transferMapper.requestToEntity(request)).thenReturn(mapped);
+        when(transferRepository.saveAndFlush(mapped)).thenReturn(saved);
+        when(transferMapper.toDto(saved)).thenReturn(dto);
+
+        TransferDto result = transferService.createTransfer(request, "key-1");
+
+        assertThat(result).isEqualTo(dto);
+        verify(idempotencyService).save("key-1", "POST /transfer/create", request, HttpStatus.CREATED, dto);
+    }
+
+    @Test
     void createTransfer_unknownSourceAccount_throwsNotFoundAndSavesNothing() {
         when(accountRepository.findUserAccountById(1L)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> transferService.createTransfer(request))
+        assertThatThrownBy(() -> transferService.createTransfer(request, null))
                 .isInstanceOfSatisfying(ResponseStatusException.class,
                         e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND))
                 .hasMessageContaining("Account 1 not found");
@@ -116,7 +155,7 @@ class TransferServiceTest {
         when(accountAccessChecker.canAccess(1L)).thenReturn(true);
         when(accountRepository.findUserAccountById(2L)).thenReturn(Optional.of(eurAccount));
 
-        assertThatThrownBy(() -> transferService.createTransfer(request))
+        assertThatThrownBy(() -> transferService.createTransfer(request, null))
                 .isInstanceOfSatisfying(ResponseStatusException.class,
                         e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST))
                 .hasMessageContaining("EUR");
@@ -131,7 +170,7 @@ class TransferServiceTest {
         when(accountAccessChecker.canAccess(1L)).thenReturn(true);
         when(accountRepository.findUserAccountById(2L)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> transferService.createTransfer(request))
+        assertThatThrownBy(() -> transferService.createTransfer(request, null))
                 .isInstanceOfSatisfying(ResponseStatusException.class,
                         e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND))
                 .hasMessageContaining("Account 2 not found");
@@ -145,7 +184,7 @@ class TransferServiceTest {
         when(accountRepository.findUserAccountById(1L)).thenReturn(Optional.of(from));
         when(accountAccessChecker.canAccess(1L)).thenReturn(false);
 
-        assertThatThrownBy(() -> transferService.createTransfer(request))
+        assertThatThrownBy(() -> transferService.createTransfer(request, null))
                 .isInstanceOfSatisfying(ResponseStatusException.class,
                         e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND))
                 .hasMessageContaining("Account 1 not found");
@@ -161,7 +200,7 @@ class TransferServiceTest {
         when(accountAccessChecker.canAccess(1L)).thenReturn(true);
         when(accountRepository.findUserAccountById(2L)).thenReturn(Optional.of(to));
 
-        assertThatThrownBy(() -> transferService.createTransfer(eurRequest))
+        assertThatThrownBy(() -> transferService.createTransfer(eurRequest, null))
                 .isInstanceOfSatisfying(ResponseStatusException.class,
                         e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST))
                 .hasMessageContaining("USD");
@@ -176,7 +215,7 @@ class TransferServiceTest {
         when(accountRepository.findUserAccountById(1L)).thenReturn(Optional.of(from));
         when(accountAccessChecker.canAccess(1L)).thenReturn(true);
 
-        assertThatThrownBy(() -> transferService.createTransfer(selfRequest))
+        assertThatThrownBy(() -> transferService.createTransfer(selfRequest, null))
                 .isInstanceOfSatisfying(ResponseStatusException.class,
                         e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST))
                 .hasMessageContaining("same account");

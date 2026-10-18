@@ -36,6 +36,7 @@ public class DepositServiceImpl implements DepositService {
     private static final String AGGREGATE_TYPE = "deposit";
     private static final String DEPOSIT_CREATED = "DepositCreated";
 
+
     private final DepositMapper depositMapper;
     private final AccountAccessChecker accountAccessChecker;
     private final OutboxEventService outboxEventService;

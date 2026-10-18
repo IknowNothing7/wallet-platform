@@ -4,14 +4,17 @@ import com.waller.wallet_platform.common.util.ApiUtils;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import com.waller.wallet_platform.common.web.ApiResponse;
 import com.waller.wallet_platform.common.web.PageResponse;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
+import com.waller.wallet_platform.transfer.dto.ReverseRequest;
 import com.waller.wallet_platform.transfer.dto.TransferDto;
 import com.waller.wallet_platform.transfer.dto.TransferRequest;
+import com.waller.wallet_platform.transfer.service.TransferProcessingService;
 import com.waller.wallet_platform.transfer.service.TransferService;
 
 @RestController
@@ -21,6 +24,7 @@ import com.waller.wallet_platform.transfer.service.TransferService;
 public class TransferController {
 
     private final TransferService transferService;
+    private final TransferProcessingService transferProcessingService;
 
 
     @GetMapping("/{id}")
@@ -38,9 +42,21 @@ public class TransferController {
 
     @PostMapping("/create")
     @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<TransferDto> createTransfer( @Valid @RequestBody TransferRequest request) {
+    public ApiResponse<TransferDto> createTransfer(
+            @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
+            @Valid @RequestBody TransferRequest request) {
         log.info("Endpoint {}", ApiUtils.getMethodName());
-        return ApiResponse.ok(transferService.createTransfer(request));
+        return ApiResponse.ok(transferService.createTransfer(request, idempotencyKey));
+    }
+
+    @PostMapping("/{id}/reverse")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<TransferDto> reverseTransfer(
+            @PathVariable("id") Long transferId,
+            @Valid @RequestBody ReverseRequest request) {
+        log.info("Endpoint {}", ApiUtils.getMethodName());
+        return ApiResponse.ok(transferProcessingService.reverse(transferId, request.getReason()));
     }
 
 }

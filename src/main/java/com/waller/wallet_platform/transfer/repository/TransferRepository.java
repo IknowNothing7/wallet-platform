@@ -41,4 +41,13 @@ Optional<Transfer> findByIdForUpdate(@Param("id") Long id);
 @Query("select t.id from Transfer t where t.status = :status and t.createdAt < :before order by t.createdAt asc, t.id asc")
 List<Long> findIdsByStatusCreatedBefore(@Param("status") TransferStatus status, @Param("before") Instant before, Pageable page);
 
+// Outgoing total for the daily limit; served by idx_transfer_from
+@Query("""
+       select coalesce(sum(t.amount), 0) from Transfer t
+       where t.fromAccount.id = :accountId and t.status = :status and t.createdAt > :since
+       """)
+long sumAmountByFromAccountIdAndStatusSince(@Param("accountId") Long accountId,
+                                            @Param("status") TransferStatus status,
+                                            @Param("since") Instant since);
+
 }

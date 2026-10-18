@@ -7,9 +7,6 @@ import com.waller.wallet_platform.transfer.entity.Transfer;
 import com.waller.wallet_platform.user.entity.AppUser;
 import com.waller.wallet_platform.user.entity.UserRole;
 
-// TODO: Each @SpringBootTest class (Account/Deposit/User/TransferControllerTest) starts its own Postgres container and
-//  Spring context, and copies the same @Container/@LocalServerPort/RestAssured.port setup. Move it into one abstract
-//  base class here (a static container started once, plus a shared cleanup helper) so the context and container are reused.
 // TODO: Deposit and outbox tests build entities by hand in setUp(); add factories here (hold, outboxEvent) as they are needed.
 // Shared factories for test entities. Each one fills in only the required fields;
 // tests set whatever else they care about so the values they assert on stay visible.

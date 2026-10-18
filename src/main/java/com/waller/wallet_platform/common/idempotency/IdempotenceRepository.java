@@ -13,4 +13,6 @@ public interface IdempotenceRepository extends JpaRepository<IdempotencyKey,Long
 
     Page<IdempotencyKey> findAll(Pageable page);
 
+    Optional<IdempotencyKey> findByUserIdAndKey(Long userId, String key);
+
 }

@@ -1,6 +1,7 @@
 package com.waller.notification_service.config;
 
 import java.time.Duration;
+import org.apache.kafka.common.TopicPartition;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -14,7 +15,7 @@ import tools.jackson.core.JacksonException;
 public class KafkaConsumerConfig {
 
     // Picked up by Boot's listener container factory: retries with backoff, then publishes to <topic>.DLT
-    // TODO: KafkaTemplate needs producer config (string serializers) for the DLT publisher
+    // through Boot's KafkaTemplate (producer settings in application.yaml)
     @Bean
     public DefaultErrorHandler kafkaErrorHandler(
             KafkaTemplate<Object, Object> kafkaTemplate,
@@ -24,8 +25,10 @@ public class KafkaConsumerConfig {
         ExponentialBackOff backOff = new ExponentialBackOff(initialBackoff.toMillis(), 2.0);
         backOff.setMaxInterval(maxBackoff.toMillis());
         backOff.setMaxAttempts(maxAttempts);
-        DefaultErrorHandler errorHandler =
-                new DefaultErrorHandler(new DeadLetterPublishingRecoverer(kafkaTemplate), backOff);
+        // Spring Kafka's default is <topic>-dlt; set the name explicitly so it is part of this service's contract
+        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(kafkaTemplate,
+                (record, exception) -> new TopicPartition(record.topic() + ".DLT", record.partition()));
+        DefaultErrorHandler errorHandler = new DefaultErrorHandler(recoverer, backOff);
         // Malformed records (missing header/field, bad JSON) go straight to the DLT; retrying cannot fix them
         errorHandler.addNotRetryableExceptions(IllegalArgumentException.class, JacksonException.class);
         return errorHandler;

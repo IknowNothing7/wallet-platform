@@ -8,22 +8,16 @@ import com.waller.wallet_platform.ledger.entity.JournalEntryType;
 import com.waller.wallet_platform.ledger.entity.PostingDirection;
 import com.waller.wallet_platform.ledger.repository.JournalEntryRepository;
 import com.waller.wallet_platform.ledger.repository.PostingRepository;
-import com.waller.wallet_platform.outbox.repository.OutboxRepository;
 import com.waller.wallet_platform.security.JwtTokenProvider;
 import com.waller.wallet_platform.user.entity.AppUser;
 import com.waller.wallet_platform.user.entity.UserRole;
 import com.waller.wallet_platform.user.repository.AppUserRepository;
+import com.waller.wallet_platform.support.IntegrationTest;
 import io.restassured.RestAssured;
 import io.restassured.http.ContentType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.util.List;
 
@@ -34,18 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
 
-// No Kafka here: poll only once at startup so the publisher doesn't hold outbox row locks while it waits for a broker
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "outbox.publisher.poll-interval=PT1H")
-@Testcontainers
-public class PostingControllerTest {
-
-    @Container
-    @ServiceConnection
-    static PostgreSQLContainer postgresql = new PostgreSQLContainer("postgres:17-alpine");
-
-    @LocalServerPort
-    private Integer port;
+public class PostingControllerTest extends IntegrationTest {
 
     @Autowired
     private PostingRepository postingRepository;
@@ -53,8 +36,6 @@ public class PostingControllerTest {
     private JournalEntryRepository journalEntryRepository;
     @Autowired
     private AccountRepository accountRepository;
-    @Autowired
-    private OutboxRepository outboxRepository;
     @Autowired
     private AppUserRepository appUserRepository;
     @Autowired
@@ -67,13 +48,6 @@ public class PostingControllerTest {
 
     @BeforeEach
     void setUp() {
-        RestAssured.port = port;
-        postingRepository.deleteAll();
-        journalEntryRepository.deleteAll();
-        outboxRepository.deleteAll();
-        accountRepository.deleteAll();
-        appUserRepository.deleteAll();
-
         admin = appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
         AppUser alice = appUserRepository.save(user("Alice", "alice@email.com", UserRole.USER));
         AppUser bob = appUserRepository.save(user("Bob", "bob@email.com", UserRole.USER));

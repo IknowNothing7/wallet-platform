@@ -1,0 +1,14 @@
+.git
+.gradle
+.idea
+.vscode
+.settings
+.classpath
+.project
+.factorypath
+**/build
+**/bin
+**/out
+monitoring
+contracts
+docs

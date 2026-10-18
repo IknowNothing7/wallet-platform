@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.wallet-platform.local/events/DepositExpired.v1.schema.json",
+  "title": "DepositExpired",
+  "description": "No final result arrived from the bank before expiresAt; nothing was posted. A late success raises an alert instead of a new event.",
+  "x-event-type": "DepositExpired",
+  "x-event-version": 1,
+  "x-topic": "wallet.deposit",
+  "x-key": "aggregate id, as a decimal string",
+  "type": "object",
+  "required": [
+    "id",
+    "createdAt",
+    "updatedAt",
+    "accountId",
+    "amount",
+    "currency",
+    "gateway",
+    "gatewayReference",
+    "status",
+    "failureReason",
+    "expiresAt"
+  ],
+  "properties": {
+    "id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "accountId": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Id of another wallet aggregate"
+    },
+    "amount": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Minor units (cents)"
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "description": "ISO 4217 code"
+    },
+    "gateway": {
+      "type": "string",
+      "maxLength": 50
+    },
+    "gatewayReference": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 255,
+      "description": "bank-sim payment reference; null until the bank has accepted the payment"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PENDING",
+        "SUCCEEDED",
+        "FAILED",
+        "EXPIRED"
+      ]
+    },
+    "failureReason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 255
+    },
+    "expiresAt": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "When a still-PENDING deposit is expired; null only for deposits created before it was set"
+    }
+  },
+  "additionalProperties": true,
+  "examples": [
+    {
+      "id": 42,
+      "createdAt": "2026-10-11T08:49:42.695Z",
+      "updatedAt": "2026-10-11T09:19:45.002Z",
+      "accountId": 7,
+      "amount": 1500,
+      "currency": "EUR",
+      "gateway": "bank-sim",
+      "gatewayReference": null,
+      "status": "EXPIRED",
+      "failureReason": null,
+      "expiresAt": "2026-10-11T09:19:42.695Z"
+    }
+  ]
+}

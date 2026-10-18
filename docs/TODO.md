@@ -1,8 +1,9 @@
 # TODOs
 
-All `TODO` comments in the codebase, collected on 2026-10-15 (78 total) and updated on 2026-10-17. Paths are relative
-to the repo root; `wallet-service` code lives under `src/main/java/com/waller/wallet_platform/` and its tests under
-`src/test/java/com/waller/wallet_platform/`. Line numbers are from the first collection and may have drifted.
+All `TODO` comments in the codebase, collected on 2026-10-15 (78 total) and last checked against the code on
+2026-10-18 (49 left). Paths are relative to the repo root; `wallet-service` code lives under
+`src/main/java/com/waller/wallet_platform/` and its tests under `src/test/java/com/waller/wallet_platform/`. Line
+numbers are as of 2026-10-18; done items keep the line they had when they were done.
 
 ## Road to done
 
@@ -11,40 +12,44 @@ command, and the README explains it. The sections below this one list every TODO
 
 ### Must do
 
-1. **Deposits never reach the bank.** `DepositProcessingServiceImpl.submitToBank` exists but nothing calls it, so a
-   deposit stays PENDING and bank-sim never sees it. Make `gateway_reference` nullable (migration V4) or store
-   bank-sim's reference in a new column, call `submitToBank` after `createDeposit` commits, and set `expiresAt` on
-   creation. The webhook and reconciliation code behind it is already written. See the Deposits items `:65`, `:70`
-   and `:169`.
-2. **One-command startup.** `compose.yaml` only starts Postgres and Kafka. Add Dockerfiles for wallet-service,
-   bank-sim and notification-service, and compose entries that wire them together: bank URL and the shared webhook
-   secret (`BANK_SIM_WEBHOOK_SECRET`) between wallet-service and bank-sim, Kafka and Postgres for
-   notification-service.
-3. **Check notification-service's dead-letter publishing** (`KafkaConsumerConfig.java:17`). If the DLT publisher can't
-   send, one malformed record is retried forever instead of being parked. Prove it with a test that sends a record
-   without an `event-id` header and expects it on `<topic>.DLT`.
-4. **README.** It is one line, and `HELP.md` is the Spring Initializr default (delete it). Cover what the system does,
+1. [x] **Deposits never reach the bank.** Done: V4 makes `gateway_reference` nullable, `DepositSubmissionListener`
+   calls `submitToBank` after `createDeposit` commits, `expiresAt` is set from `deposit.pending-ttl`, and the
+   reconciliation job resubmits a deposit that never got a bank reference.
+2. [x] **One-command startup.** Done: `docker compose --profile app up --build`. One `Dockerfile` (`--build-arg
+   SERVICE=wallet-service|bank-sim|notification-service`) builds all three jars in a shared stage. The services sit in
+   the `app` profile so plain `docker compose up` (and Boot's Docker Compose support for `bootRun`) still starts only
+   the infrastructure. Kafka has a second listener, `kafka:19092`, for containers. Smoke-tested: register, account,
+   deposit, bank-sim webhook, outbox, Kafka, notification. notification-service now re-matches its topic pattern every
+   10 s (`metadata.max.age.ms`); with the 5-minute default a fresh stack showed no notifications at first.
+   - [ ] notification-service validates JWTs against `WALLET_JWKS_URI` (`/.well-known/jwks.json`), but wallet-service
+     signs HS512 with `jwt.secret` and serves no JWKS, so its notification API rejects every wallet token. Either
+     move wallet-service to an asymmetric key with a JWKS endpoint, or give notification-service the shared secret.
+3. [x] **Test notification-service's dead-letter publishing.** Done: `WalletEventDlqTest` (Kafka + Postgres
+   Testcontainers) covers a record without headers and malformed JSON (straight to `<topic>.DLT`, handler never
+   called) and `UnknownAccountException` (retried, then dead-lettered with the original headers). It found two bugs,
+   both fixed: Spring Kafka 4 defaults to `<topic>-dlt`, so the destination is now set explicitly, and the
+   `wallet\..*` pattern also matched the DLT, so the service consumed its own dead letters (now `wallet\.[a-z_]+`).
+4. [ ] **README.** It is one line, and `HELP.md` is the Spring Initializr default (delete it). Cover what the system does,
    the architecture (wallet-service → outbox → Kafka → notification-service; bank-sim → signed webhook →
    wallet-service), how to run it, and how to use the bank-sim scenarios (`/control`) to demonstrate failures.
 
 ### Should do
 
-- Idempotency-Key on `POST /transfer/create` (Transfers `:55`).
-- Bank error handling in `BankClient`: retry, 4xx vs 5xx, 404 (Bank integration `:39`, `:41`, `:54`). Only matters
-  once deposits are submitted.
-- Decide whether deposits into a FROZEN account are allowed (Deposits `:71`).
-- Admin endpoint for transfer reversal, and lock both accounts in id order there so it can't deadlock with
-  `process()` (Transfers `:96`, `:109`).
-- Event schemas for `DepositSucceeded|DepositFailed|DepositExpired` and `TransferCompleted|TransferFailed|TransferReversed`
-  (Deposits `:41`, Transfers `:38`), plus notification templates for deposit results (Other services).
-- One shared Postgres container for the `@SpringBootTest` classes (Tests, Shared setup `:10`); the suite gets slower
-  with every controller test.
+- [x] Idempotency-Key on `POST /transfer/create`.
+- [x] Bank error handling in `BankClient`: retry, 4xx vs 5xx, 404 (Bank integration). Done, see below.
+- [x] Deposits into a non-ACTIVE account are rejected (`DepositServiceImpl.java:55`). Still needs a test (Tests,
+  Deposits `DepositServiceTest.java:188`).
+- [x] Admin endpoint for transfer reversal, with both accounts locked in id order.
+- [x] Event schemas for `DepositSucceeded|DepositFailed|DepositExpired` and
+  `TransferCompleted|TransferFailed|TransferReversed`.
+- [ ] Notification templates for deposit results (Other services, `NotificationTemplates.java:27`).
+- [x] One shared Postgres container for the `@SpringBootTest` classes (Tests, Shared setup). Done: `support/IntegrationTest`.
 
 ### Can wait (list as known limitations in the README)
 
-Multi-instance job claiming (ShedLock / SKIP LOCKED), metrics and alerts, fees, transfer limits and fraud checks,
-partial reversals, webhook secret rotation, push notifications, rate limiting the webhook endpoint, and the test
-cleanup items below.
+Multi-instance job claiming (ShedLock / SKIP LOCKED), metrics and alerts, fraud/velocity checks, partial reversals,
+storing the fee on the transfer (reversals recompute it from the current rate), cancelling expired payments at the
+bank, webhook secret rotation, push notifications, rate limiting the webhook endpoint, and the test cleanup items below.
 
 ## wallet-service — main code
 
@@ -56,34 +61,32 @@ cleanup items below.
   ShedLock or SKIP LOCKED claiming.
 - [ ] `deposit/job/DepositReconciliationJob.java:61` — Metrics: count of stale PENDING deposits and oldest age, for an
   alert.
-- [ ] `deposit/job/DepositReconciliationJob.java:69` — A deposit whose `submitToBank` never got a response has no bank
-  reference yet: resubmit it (same idempotency key, so no double charge) instead of looking it up.
-- [ ] `deposit/service/DepositProcessingServiceImpl.java:41` — Add
-  `contracts/events/DepositSucceeded|DepositFailed|DepositExpired.v1.schema.json` and the README table rows.
-- [ ] `deposit/service/DepositProcessingServiceImpl.java:65` — Wire this in. `createDeposit` still takes
-  `gatewayReference` from the client, but with bank-sim the reference only exists after `POST /payments`. Options: make
-  `gateway_reference` nullable (migration V4, the unique constraint still works since NULLs don't collide), or keep the
-  client-supplied value as our own reference and store bank-sim's in a new column. Then call `submitToBank` after
-  `createDeposit` commits (directly, or from a DepositCreated consumer / outbox-style job so a crash in between is
-  retried).
-- [ ] `deposit/service/DepositProcessingServiceImpl.java:70` — Set `deposit.expiresAt` on creation (config:
-  `deposit.pending-ttl`) so `expire()` has something to check.
-- [ ] `deposit/service/DepositProcessingServiceImpl.java:71` — Check the account is ACTIVE before sending money in (see
-  the TODO in `DepositServiceTest`).
-- [ ] `deposit/service/DepositProcessingServiceImpl.java:96` — Alert: a webhook for a missing deposit means money with
-  no deposit.
-- [ ] `deposit/service/DepositProcessingServiceImpl.java:102` — Alert / park for manual review on an amount mismatch.
-  Never credit an amount the user didn't ask for.
-- [ ] `deposit/service/DepositProcessingServiceImpl.java:111` — Decide: credit anyway (late success) or refund through
-  the bank; at least alert.
-- [ ] `deposit/service/DepositProcessingServiceImpl.java:136` — Ask the bank first (`getPayment`) so a payment that did
-  succeed isn't expired; or cancel it at the bank.
+- [x] `deposit/job/DepositReconciliationJob.java:69` — Done: a deposit without a bank reference is resubmitted with the
+  same idempotency key.
+- [x] `deposit/service/DepositProcessingServiceImpl.java:43` — Done: `DepositSucceeded`, `DepositFailed` and
+  `DepositExpired` schemas, and the README row. `DepositCreated` now allows a null `gatewayReference` (it is set
+  after `submitToBank`).
+- [x] `deposit/service/DepositProcessingServiceImpl.java:65` — Done: `gateway_reference` is nullable (V4) and
+  `DepositSubmissionListener` calls `submitToBank` after `createDeposit` commits.
+- [x] `deposit/service/DepositProcessingServiceImpl.java:70` — Done: `expiresAt` is set on creation from
+  `deposit.pending-ttl` (default `PT30M`).
+- [x] `deposit/service/DepositProcessingServiceImpl.java:71` — Done: `DepositServiceImpl.createDeposit` rejects
+  non-ACTIVE accounts.
+- [x] `deposit/service/DepositProcessingServiceImpl.java:96` — Done: `DepositAlerts` is raised for a webhook about a
+  missing deposit.
+- [x] `deposit/service/DepositProcessingServiceImpl.java:102` — Done: an amount/currency/reference mismatch raises
+  `RESULT_MISMATCH` and leaves the deposit for manual review.
+- [x] `deposit/service/DepositProcessingServiceImpl.java:111` — Done: a late result for a settled deposit raises
+  `STATUS_CONFLICT`; status and ledger are left for a manual credit or refund.
+- [x] `deposit/service/DepositProcessingServiceImpl.java:136` — Done: `expire()` asks the bank (`getPayment`) first.
+- [ ] `deposit/service/DepositProcessingServiceImpl.java:141` — Cancel the payment at the bank once bank-sim supports
+  it; a late success now raises `STATUS_CONFLICT`.
 - [x] `deposit/service/DepositProcessingServiceImpl.java:153` — Balances only change once `PostingServiceImpl` applies
-  postings. Done: postings now move balances. Remove the comment.
-- [ ] `deposit/service/DepositProcessingServiceImpl.java:154` — Fees: a FEE posting to `SystemAccountKind.FEES`,
+  postings. Done: postings now move balances.
+- [x] `deposit/service/DepositProcessingServiceImpl.java:154` — Done: 2% fee posted to `SystemAccountKind.FEES`,
   credited amount = amount - fee.
-- [ ] `deposit/service/DepositProcessingServiceImpl.java:169` — Once `gateway_reference` is set by `submitToBank`, also
-  require it to equal `result.reference()`.
+- [x] `deposit/service/DepositProcessingServiceImpl.java:169` — Done: once set, `gateway_reference` must equal
+  `result.reference()`.
 
 ### Ledger
 
@@ -99,29 +102,24 @@ cleanup items below.
 - [ ] `transfer/job/TransferProcessingJob.java:51` — Count attempts and fail the transfer after N, so one broken row
   isn't retried forever.
 - [ ] `transfer/job/TransferProcessingJob.java:55` — Metrics: count of PENDING transfers and oldest age, for an alert.
-- [ ] `transfer/service/TransferProcessingServiceImpl.java:38` — Add
-  `contracts/events/TransferCompleted|TransferFailed|TransferReversed.v1.schema.json` and the README rows.
-- [x] `transfer/service/TransferProcessingServiceImpl.java:52` — Effectively done: `TransferProcessingJob` processes
-  PENDING transfers every `transfer.processing.poll-interval` (asynchronous). Remove the comment, or switch to
-  synchronous processing if the response should already say COMPLETED/FAILED. Original note: Wire this in. Either call it from `createTransfer` in
-  the same transaction (synchronous: the response already says COMPLETED/FAILED), or leave `createTransfer` as is and
-  let `TransferProcessingJob` pick it up (asynchronous: the client polls `GET /transfer/{id}`). Synchronous is simpler;
-  async allows limits/fraud checks.
-- [ ] `transfer/service/TransferProcessingServiceImpl.java:55` — Idempotency-Key on `POST /transfer/create`
-  (`common/idempotency` exists), so a retried request doesn't create and book a second transfer.
+- [x] `transfer/service/TransferProcessingServiceImpl.java:38` — Done: `TransferCompleted`, `TransferFailed` and
+  `TransferReversed` schemas, and the README row.
+- [x] `transfer/service/TransferProcessingServiceImpl.java:52` — Done: `TransferProcessingJob` processes PENDING
+  transfers every `transfer.processing.poll-interval` (asynchronous; the client polls `GET /transfer/{id}`).
+- [x] `transfer/service/TransferProcessingServiceImpl.java:55` — Done: `POST /transfer/create` takes an optional
+  `Idempotency-Key` header (`common/idempotency/IdempotencyService`).
 - [x] `transfer/service/TransferProcessingServiceImpl.java:86` — Balances only change once `PostingServiceImpl` applies
-  postings; until then the funds check reads a balance that never moves. Done; remove the comment.
-- [ ] `transfer/service/TransferProcessingServiceImpl.java:88` — Fees: a FEE posting from the sender to
-  `SystemAccountKind.FEES`.
-- [ ] `transfer/service/TransferProcessingServiceImpl.java:96` — Expose as an admin-only endpoint
-  (`POST /transfer/{id}/reverse`), like the journal entry controller.
-- [ ] `transfer/service/TransferProcessingServiceImpl.java:109` — Lock both accounts in id order as in `process()`, and
-  decide what happens when the recipient has already spent the money: refuse (409), or allow a negative balance and
-  collect it later.
+  postings. Done.
+- [x] `transfer/service/TransferProcessingServiceImpl.java:88` — Done: 2% fee taken from what the recipient gets and
+  credited to `SystemAccountKind.FEES`; a fee that rounds to 0 gets no posting.
+- [x] `transfer/service/TransferProcessingServiceImpl.java:96` — Done: `POST /transfer/{id}/reverse`, admin only.
+- [x] `transfer/service/TransferProcessingServiceImpl.java:109` — Done: both accounts are locked in id order. A
+  recipient who no longer has the money (balance minus active holds) gets 409 and the transfer stays COMPLETED. The
+  reversal refunds the fee too.
 - [ ] `transfer/service/TransferProcessingServiceImpl.java:111` — Partial reversals (amount < transfer amount) would
-  need a `reversed_amount` column.
-- [ ] `transfer/service/TransferProcessingServiceImpl.java:146` — Limits (per transfer, daily per user) and a
-  fraud/velocity check.
+  need a `reversed_amount` column. Comment removed; not done (Can wait).
+- [x] `transfer/service/TransferProcessingServiceImpl.java:146` — Done: per-transfer and daily limits (`transfer_limit`,
+  V5; an account row overrides the currency default). Fraud/velocity checks are not planned for now (Can wait).
 
 ### Bank integration
 
@@ -131,22 +129,23 @@ cleanup items below.
   instead of only logging.
 - [ ] `bank/webhook/BankWebhookController.java:50` — Rate limit / size limit this endpoint like `/api/auth/**`; it is
   public.
-- [ ] `bank/client/BankClient.java:39` — Retry 503s and timeouts here with the same key (bank-sim's failureRate /
-  lostResponseRate scenarios), or leave it to the reconciliation job. Decide which, and don't do both.
-- [ ] `bank/client/BankClient.java:41` — Map errors: 4xx means the request is wrong and retrying won't help (mark the
-  deposit FAILED); 5xx or timeout means the outcome is unknown (keep it PENDING).
-- [ ] `bank/client/BankClient.java:54` — 404 means the bank never stored the payment (e.g. failed before storing);
-  handle it in the caller.
+- [x] `bank/client/BankClient.java` — Retries: decided, left to `DepositReconciliationJob` (resubmits with the same
+  key). `BankClient` does not retry.
+- [x] `bank/client/BankClient.java` — Done: 4xx throws `BankRejectedException` and `submitToBank` marks the deposit
+  FAILED (reason `Rejected by bank (<status>): <body>`, cut to 255) with a `DepositFailed` event; 5xx and timeouts
+  propagate and it stays PENDING. Tests: `BankClientTest`, `DepositProcessingServiceTest`.
+- [x] `bank/client/BankClient.java` — 404 from `getPayment`: already handled, `findBankPayment` in
+  `DepositProcessingServiceImpl` treats it as "no payment".
 
 ## wallet-service — tests
 
 ### Shared setup
 
-- [ ] `support/TestData.java:10` — Each `@SpringBootTest` class (Account/Deposit/User/TransferControllerTest) starts its
-  own Postgres container and Spring context, and copies the same `@Container`/`@LocalServerPort`/`RestAssured.port`
-  setup. Move it into one abstract base class (a static container started once, plus a shared cleanup helper) so the
-  context and container are reused.
-- [ ] `support/TestData.java:13` — Deposit and outbox tests build entities by hand in `setUp()`; add factories here
+- [x] `support/IntegrationTest.java` — Done: the `@SpringBootTest` classes extend one base class with a Postgres
+  container started once per JVM and one shared context (no Kafka, background jobs parked). Before each test it
+  truncates every table and re-inserts the V5 transfer-limit defaults; the suite went from ~2 min to ~15 s. Subclasses
+  must not add properties, `@MockitoBean`s or `@DirtiesContext`, or they get a context of their own.
+- [ ] `support/TestData.java:10` — Deposit and outbox tests build entities by hand in `setUp()`; add factories here
   (hold, outboxEvent) as they are needed.
 
 ### Outbox
@@ -204,21 +203,20 @@ cleanup items below.
   - Another user reading `/deposit/account/{id}` or `/deposit/{id}` gets 404.
   - The publisher polls a missing Kafka broker in the background; set `outbox.publisher.poll-interval=PT1H` like
     `TransferControllerTest` before adding tests that write outbox events.
-- [ ] `deposit/service/DepositServiceTest.java:43` — `PER_METHOD` is already JUnit's default; remove `@TestInstance`
+- [ ] `deposit/service/DepositServiceTest.java:48` — `PER_METHOD` is already JUnit's default; remove `@TestInstance`
   here, in `AccountServiceTest` and `AppUserServiceTest`. Also remove the unused imports (`DepositServiceImpl` is in
   this package).
-- [ ] `deposit/service/DepositServiceTest.java:117` — Argument order is reversed (expected value goes first), so a
+- [ ] `deposit/service/DepositServiceTest.java:130` — Argument order is reversed (expected value goes first), so a
   failure message would be misleading.
-- [ ] `deposit/service/DepositServiceTest.java:121` — This should be `account.getId()`. It passes only because the user
+- [ ] `deposit/service/DepositServiceTest.java:134` — This should be `account.getId()`. It passes only because the user
   and account ids are both 1.
-- [ ] `deposit/service/DepositServiceTest.java:136` — Also `verifyNoInteractions(repository, outboxEventService)`.
+- [ ] `deposit/service/DepositServiceTest.java:150` — Also `verifyNoInteractions(repository, outboxEventService)`.
   Without it, a deposit saved before the account check would still pass.
-- [ ] `deposit/service/DepositServiceTest.java:172` — Missing cases: currency mismatch (400, nothing saved), and
+- [ ] `deposit/service/DepositServiceTest.java:186` — Missing cases: currency mismatch (400, nothing saved), and
   `getDeposit` for your own deposit, someone else's, and a missing one. Also reformat the last two tests; their
   indentation is off.
-- [ ] `deposit/service/DepositServiceTest.java:174` — `createDeposit` doesn't check account status (`HoldServiceImpl`
-  rejects non-ACTIVE accounts). Decide whether deposits into a FROZEN account should be allowed, then add a test either
-  way.
+- [ ] `deposit/service/DepositServiceTest.java:188` — The comment is stale: `createDeposit` now rejects non-ACTIVE
+  accounts (`DepositServiceImpl.java:55`). Add a test for a FROZEN account (nothing saved), then update the comment.
 
 ### Ledger
 
@@ -230,12 +228,11 @@ cleanup items below.
   - balancing is per currency: a USD debit against an EUR credit of the same amount gives 400
   - `getPosting` for someone else's posting gives 404
 - [x] `ledger/service/PostingServiceTest.java:116` — Done: `PostingServiceTest` checks balances, and
-  `PostingControllerTest` checks them against Postgres. Original note: Once `PostingServiceImpl` applies postings to balances, add tests
-  that check the balances, ideally against Postgres.
+  `PostingControllerTest` checks them against Postgres.
 
 ### Users
 
-- [ ] `user/controller/UserControllerTest.java:91` — Missing endpoint tests:
+- [ ] `user/controller/UserControllerTest.java:135` — Missing endpoint tests:
   - [x] `POST /user/create`: 201; the password hash never appears in the response; a duplicate email in different case
     gives 409.
   - `GET /user` paging (page/size) and `@Max(100)` on size give 400 with the parameter name.
@@ -257,16 +254,16 @@ cleanup items below.
   403), and noUser for capture/release/expire.
 - [ ] `hold/controller/HoldControllerSecurityTest.java:202` — No test sends a real JWT through
   `JwtAuthenticationFilter` (valid, expired, denylisted token). Cover that once in a security test, not per controller.
-- [ ] `hold/service/HoldServiceTest.java:140` — Also verify that `sumAmountByAccountIdAndStatus` received "now" and not
+- [ ] `hold/service/HoldServiceTest.java:139` — Also verify that `sumAmountByAccountIdAndStatus` received "now" and not
   some other Instant. Expired-but-still-ACTIVE holds must not count against the balance, and with `any(Instant.class)`
   that bug would go unnoticed.
-- [ ] `hold/service/HoldServiceTest.java:298` — Missing: a capture whose destination is a system account
+- [ ] `hold/service/HoldServiceTest.java:297` — Missing: a capture whose destination is a system account
   (`findUserAccountById` hides it, so it should be a 404).
-- [ ] `hold/service/HoldServiceTest.java:480` — Missing: `releaseHold` / `expireHold` for a hold that doesn't exist
+- [ ] `hold/service/HoldServiceTest.java:479` — Missing: `releaseHold` / `expireHold` for a hold that doesn't exist
   (404).
-- [ ] `hold/service/HoldServiceTest.java:481` — Missing: the access check on capture/release, if merchants should only
+- [ ] `hold/service/HoldServiceTest.java:480` — Missing: the access check on capture/release, if merchants should only
   touch holds they created (currently any MERCHANT may capture any hold).
-- [ ] `hold/service/HoldServiceTest.java:483` — The FOR UPDATE locking and the active-hold sum are only mocked here. Add
+- [ ] `hold/service/HoldServiceTest.java:482` — The FOR UPDATE locking and the active-hold sum are only mocked here. Add
   a Testcontainers test where two holds race for the last of the balance and only one succeeds.
 
 ### Transfers
@@ -279,6 +276,9 @@ cleanup items below.
   - A transfer to the same account gives 400. Today `chk_transfer_distinct` turns it into a 500.
   - `request.currency` that differs from both accounts' currency gives 400.
   - An unknown destination account gives a 404 naming that account; the message currently uses the source id.
+- [ ] No TODO comment yet: fees and reversal in `TransferProcessingServiceImpl` have no tests. Cover the fee postings
+  (including a fee that rounds to 0), a full reversal (fee refunded, balances back), and the 409 when the recipient has
+  spent the money.
 
 ### Auth
 
@@ -290,15 +290,16 @@ cleanup items below.
 - [ ] Not yet tested: `NotificationRepository` against Postgres (`markAllRead` touches only that user's unread rows,
   unread count, newest first), `NotificationController` security (401 without a token, user id taken from the
   `user_id` claim), and bank-sim's `WebhookSender` (backoff until 2xx, gives up after `maxAttempts`, DROP and
-  DUPLICATE modes, `resend` of a PENDING payment gives 409). notification-service has no Testcontainers dependency yet.
+  DUPLICATE modes, `resend` of a PENDING payment gives 409). notification-service now has Testcontainers (Kafka, Postgres).
 
 - [ ] `services/bank-sim/src/main/java/com/waller/bank_sim/payment/service/PaymentServiceImpl.java:42` — Reject a
   reused key whose amount/currency differ from the original request (422).
 - [ ] `services/notification-service/src/main/java/com/waller/notification_service/config/SecurityConfig.java:31` —
   Refresh on an unknown `kid` (key rotation) without evicting the keys that still work.
-- [ ] `services/notification-service/src/main/java/com/waller/notification_service/config/KafkaConsumerConfig.java:17` —
-  `KafkaTemplate` needs producer config (string serializers) for the DLT publisher.
+- [x] `services/notification-service/src/main/java/com/waller/notification_service/config/KafkaConsumerConfig.java:17` —
+  Done: the DLT publisher uses Boot's `KafkaTemplate`, with String serializers set under `spring.kafka.producer` in
+  `application.yaml`. Covered by `WalletEventDlqTest` (Road to done, Must do 3).
 - [ ] `services/notification-service/src/main/java/com/waller/notification_service/notification/service/NotificationTemplates.java:27` —
-  DepositSucceeded / DepositFailed templates once wallet-service emits them from the bank webhook.
+  DepositSucceeded / DepositFailed templates. wallet-service now emits both, so this is unblocked.
 - [ ] `services/notification-service/src/main/java/com/waller/notification_service/notification/service/NotificationServiceImpl.java:35` —
   Push channel (email / web push / SSE) goes here.

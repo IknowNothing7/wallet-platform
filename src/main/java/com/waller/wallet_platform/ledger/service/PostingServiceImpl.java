@@ -61,7 +61,6 @@ public class PostingServiceImpl implements PostingService {
             posting.setDirection(r.getDirection());
             posting.setAmount(r.getAmount());
             posting.setCurrency(r.getCurrency());
-            // A credit moves money into the account, a debit moves it out
             long delta = r.getDirection() == PostingDirection.CREDIT ? r.getAmount() : -r.getAmount();
             account.setBalance(account.getBalance() + delta);
             return posting;
@@ -100,7 +99,6 @@ public class PostingServiceImpl implements PostingService {
         return postingMapper.toDtos(postingRepository.findByJournalEntryIdOrderByIdAsc(journalEntryId));
     }
 
-    // Debits must equal credits within every currency, or the ledger drifts
     private void requireBalanced(List<PostingRequest> requests) {
         if (requests == null || requests.size() < 2) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "At least two postings are required");
