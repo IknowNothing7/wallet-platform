@@ -36,4 +36,10 @@ public class PaymentController {
     public PaymentDto getPayment(@PathVariable("reference") String reference) {
         return paymentService.getPayment(reference);
     }
+
+    // 200 with the payment either way: wallet-service reads the status to see whether the cancel won
+    @PostMapping("/{reference}/cancel")
+    public PaymentDto cancelPayment(@PathVariable("reference") String reference) {
+        return paymentService.cancelPayment(reference);
+    }
 }

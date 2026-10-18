@@ -18,7 +18,4 @@ public class AccountRequest implements Serializable {
     @Pattern(regexp = "[A-Z]{3}", message = "Currency must be a 3-letter ISO code")
     private String currency;
 
-    @NotNull(message = "UserId can not be empty")
-    private Long userId;
-
 }

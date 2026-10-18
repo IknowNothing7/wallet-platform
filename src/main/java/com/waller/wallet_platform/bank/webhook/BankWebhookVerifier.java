@@ -6,6 +6,8 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
+import java.util.List;
+import java.util.stream.Stream;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,13 +25,19 @@ public class BankWebhookVerifier {
     private static final String ALGORITHM = "HmacSHA256";
     private static final String PREFIX = "sha256=";
 
-    private final SecretKeySpec key;
+    private final List<SecretKeySpec> keys;
     private final Duration tolerance;
 
+    // A non-blank previous secret is accepted too, so during a rotation bank-sim and wallet-service can switch
+    // separately: give wallet-service the new secret with the old one as previous, then switch bank-sim, then drop it
     public BankWebhookVerifier(
             @Value("${bank.webhook.secret}") String secret,
+            @Value("${bank.webhook.previous-secret:}") String previousSecret,
             @Value("${bank.webhook.tolerance:PT5M}") Duration tolerance) {
-        this.key = new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), ALGORITHM);
+        this.keys = Stream.of(secret, previousSecret)
+                .filter(s -> !s.isBlank())
+                .map(s -> new SecretKeySpec(s.getBytes(StandardCharsets.UTF_8), ALGORITHM))
+                .toList();
         this.tolerance = tolerance;
     }
 
@@ -48,19 +56,23 @@ public class BankWebhookVerifier {
         if (age.compareTo(tolerance) > 0) {
             return false;
         }
-        byte[] expected = sign(timestamp + "." + body);
         byte[] actual;
         try {
             actual = HexFormat.of().parseHex(signature.substring(PREFIX.length()));
         } catch (IllegalArgumentException e) {
             return false;
         }
-        // Constant time, so the signature can't be guessed byte by byte from response times
-        return MessageDigest.isEqual(expected, actual);
-        // TODO: Accept a second (previous) secret during rotation, so bank-sim and wallet-service can switch separately
+        String signed = timestamp + "." + body;
+        boolean valid = false;
+        for (SecretKeySpec key : keys) {
+            // Constant time, so the signature can't be guessed byte by byte from response times. Every key is
+            // checked, not just until a match, so timing doesn't reveal which secret was used either
+            valid |= MessageDigest.isEqual(sign(key, signed), actual);
+        }
+        return valid;
     }
 
-    private byte[] sign(String data) {
+    private byte[] sign(SecretKeySpec key, String data) {
         try {
             Mac mac = Mac.getInstance(ALGORITHM);
             mac.init(key);

@@ -15,12 +15,6 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import com.waller.wallet_platform.account.entity.Account;
 import com.waller.wallet_platform.account.repository.AccountRepository;
@@ -31,25 +25,16 @@ import com.waller.wallet_platform.security.JwtTokenProvider;
 import com.waller.wallet_platform.transfer.entity.Transfer;
 import com.waller.wallet_platform.transfer.entity.TransferStatus;
 import com.waller.wallet_platform.transfer.repository.TransferRepository;
+import com.waller.wallet_platform.transfer.service.TransferProcessingService;
 import com.waller.wallet_platform.user.entity.AppUser;
 import com.waller.wallet_platform.user.entity.UserRole;
 import com.waller.wallet_platform.user.repository.AppUserRepository;
+import com.waller.wallet_platform.support.IntegrationTest;
 
 import io.restassured.RestAssured;
 import io.restassured.http.ContentType;
 
-// No Kafka here: poll only once at startup so the publisher doesn't hold outbox row locks while it waits for a broker
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "outbox.publisher.poll-interval=PT1H")
-@Testcontainers
-class TransferControllerTest {
-
-    @Container
-    @ServiceConnection
-    static PostgreSQLContainer postgresql = new PostgreSQLContainer("postgres:17-alpine");
-
-    @LocalServerPort
-    private Integer port;
+class TransferControllerTest extends IntegrationTest {
 
     @Autowired
     private TransferRepository transferRepository;
@@ -66,6 +51,9 @@ class TransferControllerTest {
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
 
+    @Autowired
+    private TransferProcessingService transferProcessingService;
+
     private AppUser alice;
     private AppUser bob;
     private Account aliceUsd;
@@ -73,12 +61,6 @@ class TransferControllerTest {
 
     @BeforeEach
     void setUp() {
-        RestAssured.port = port;
-        transferRepository.deleteAll();
-        outboxRepository.deleteAll();
-        accountRepository.deleteAll();
-        appUserRepository.deleteAll();
-
         alice = appUserRepository.save(user("Alice", "alice@email.com", UserRole.USER));
         bob = appUserRepository.save(user("Bob", "bob@email.com", UserRole.USER));
         aliceUsd = accountRepository.save(account(alice, 1000, "USD"));
@@ -273,6 +255,135 @@ class TransferControllerTest {
 
         assertThat(transferRepository.count()).isZero();
         assertThat(outboxRepository.count()).isZero();
+    }
+
+    @Test
+    void createTransfer_repeatedIdempotencyKey_returnsSameTransferAndCreatesItOnce() {
+        Integer first = postWithKey("key-1", 250).statusCode(201).extract().path("payload.id");
+        Integer second = postWithKey("key-1", 250).statusCode(201).extract().path("payload.id");
+
+        assertThat(second).isEqualTo(first);
+        assertThat(transferRepository.count()).isEqualTo(1);
+        assertThat(outboxRepository.count()).isEqualTo(1);
+    }
+
+    @Test
+    void createTransfer_idempotencyKeyReusedForDifferentBody_returns422AndCreatesNothingMore() {
+        postWithKey("key-1", 250).statusCode(201);
+
+        postWithKey("key-1", 300)
+                .statusCode(422)
+                .body("success", equalTo(false));
+
+        assertThat(transferRepository.count()).isEqualTo(1);
+    }
+
+    @Test
+    void reverseTransfer_asAdmin_returns202AndRestoresBalances() {
+        AppUser admin = appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
+        Long id = completedTransfer(500);
+
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(admin))
+                .contentType(ContentType.JSON)
+                .body(Map.of("reason", "fraud"))
+        .when()
+                .post("/transfer/{id}/reverse", id)
+        .then()
+                .statusCode(202)
+                .body("payload.status", equalTo("REVERSED"));
+
+        assertThat(accountRepository.findById(aliceUsd.getId()).orElseThrow().getBalance()).isEqualTo(1000);
+        assertThat(accountRepository.findById(bobUsd.getId()).orElseThrow().getBalance()).isZero();
+    }
+
+    @Test
+    void reverseTransfer_asNonAdmin_returns403AndChangesNothing() {
+        Long id = completedTransfer(500);
+
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(alice))
+                .contentType(ContentType.JSON)
+                .body(Map.of("reason", "fraud"))
+        .when()
+                .post("/transfer/{id}/reverse", id)
+        .then()
+                .statusCode(403);
+
+        assertThat(transferRepository.findById(id).orElseThrow().getStatus()).isEqualTo(TransferStatus.COMPLETED);
+        assertThat(accountRepository.findById(bobUsd.getId()).orElseThrow().getBalance()).isEqualTo(490);
+    }
+
+    @Test
+    void reverseTransfer_recipientSpentTheMoney_returns409() {
+        AppUser admin = appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
+        Long id = completedTransfer(500);
+        Account bobBalance = accountRepository.findById(bobUsd.getId()).orElseThrow();
+        bobBalance.setBalance(100L);
+        accountRepository.save(bobBalance);
+
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(admin))
+                .contentType(ContentType.JSON)
+                .body(Map.of("reason", "fraud"))
+        .when()
+                .post("/transfer/{id}/reverse", id)
+        .then()
+                .statusCode(409)
+                .body("message", equalTo("Destination account no longer has the funds to reverse this transfer"));
+
+        assertThat(transferRepository.findById(id).orElseThrow().getStatus()).isEqualTo(TransferStatus.COMPLETED);
+    }
+
+    @Test
+    void reverseTransfer_pendingTransfer_returns409() {
+        AppUser admin = appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
+        Transfer pending = transferRepository.save(transfer(aliceUsd, bobUsd, 500, "USD"));
+
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(admin))
+                .contentType(ContentType.JSON)
+                .body(Map.of("reason", "fraud"))
+        .when()
+                .post("/transfer/{id}/reverse", pending.getId())
+        .then()
+                .statusCode(409)
+                .body("message", equalTo("Transfer is PENDING and can not be reversed"));
+    }
+
+    @Test
+    void reverseTransfer_blankReason_returns400() {
+        AppUser admin = appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
+        Long id = completedTransfer(500);
+
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(admin))
+                .contentType(ContentType.JSON)
+                .body(Map.of("reason", " "))
+        .when()
+                .post("/transfer/{id}/reverse", id)
+        .then()
+                .statusCode(400)
+                .body("payload", hasKey("reason"));
+
+        assertThat(transferRepository.findById(id).orElseThrow().getStatus()).isEqualTo(TransferStatus.COMPLETED);
+    }
+
+    private Long completedTransfer(long amount) {
+        Transfer saved = transferRepository.save(transfer(aliceUsd, bobUsd, amount, "USD"));
+        assertThat(transferProcessingService.process(saved.getId()).status()).isEqualTo(TransferStatus.COMPLETED);
+        return saved.getId();
+    }
+
+    private io.restassured.response.ValidatableResponse postWithKey(String key, long amount) {
+        return given()
+                .auth().oauth2(jwtTokenProvider.generateToken(alice))
+                .header("Idempotency-Key", key)
+                .contentType(ContentType.JSON)
+                .body(transferBody(aliceUsd.getId(), bobUsd.getId(), amount, "USD"))
+        .when()
+                .post("/transfer/create")
+        .then();
     }
 
     private static Map<String, Object> transferBody(Long from, Long to, long amount, String currency) {

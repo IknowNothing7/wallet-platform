@@ -2,6 +2,7 @@ package com.waller.wallet_platform.hold.entity;
 
 import com.waller.wallet_platform.account.entity.Account;
 import com.waller.wallet_platform.ledger.entity.JournalEntry;
+import com.waller.wallet_platform.user.entity.AppUser;
 import java.io.Serializable;
 import java.time.Instant;
 import org.hibernate.annotations.CreationTimestamp;
@@ -67,4 +68,9 @@ public class Hold implements Serializable {
 
     @Column(name = "released_at")
     private Instant releasedAt;
+
+    // Only this merchant may capture or release the hold; null for holds created before V10
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "merchant_id")
+    private AppUser merchant;
 }

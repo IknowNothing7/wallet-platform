@@ -1,3 +1,7 @@
+# Infrastructure only (what Spring Boot's Docker Compose support starts for ./gradlew bootRun):
+#   docker compose up
+# The whole system, with the three services built from the Dockerfile:
+#   docker compose --profile app up --build
 services:
   postgres:
     image: 'postgres:latest'
@@ -8,8 +12,98 @@ services:
     ports:
       - "5432:5432"
   kafka:
-    # Single-node KRaft broker with the image defaults: listener on localhost:9092, topics auto-created.
-    # Spring Boot's Docker Compose support detects this image and sets spring.kafka.bootstrap-servers.
+    # Single-node KRaft broker, topics auto-created. Two listeners: localhost:9092 for apps on the host (Spring Boot's
+    # Docker Compose support detects this image and maps port 9092), kafka:19092 for containers on the compose network.
     image: 'apache/kafka:latest'
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: HOST://:9092,DOCKER://:19092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: HOST://localhost:9092,DOCKER://kafka:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: HOST:PLAINTEXT,DOCKER:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: DOCKER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
     ports:
       - "9092:9092"
+  prometheus:
+    image: 'prom/prometheus:v3.5.0'
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    volumes:
+      - './monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro'
+      - './monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro'
+    extra_hosts:
+      # The app runs on the host; on Linux this name doesn't exist unless mapped
+      - 'host.docker.internal:host-gateway'
+    ports:
+      - "9090:9090"
+  grafana:
+    image: 'grafana/grafana:12.1.1'
+    environment:
+      - 'GF_SECURITY_ADMIN_USER=admin'
+      - 'GF_SECURITY_ADMIN_PASSWORD=admin'
+    volumes:
+      - './monitoring/grafana/provisioning:/etc/grafana/provisioning:ro'
+      - './monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro'
+    depends_on:
+      - prometheus
+    ports:
+      - "3001:3000"   # 3000 is the frontend (app.cors.allowed-origins)
+
+  # --- The services (profile "app"); same host ports as bootRun, so stop any locally running instance first ---
+
+  wallet-service:
+    profiles: [app]
+    build:
+      context: .
+      args:
+        SERVICE: wallet-service
+    environment:
+      # Set explicitly: Boot's Docker Compose support is development-only and not in the jar
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/mydatabase
+      SPRING_DATASOURCE_USERNAME: myuser
+      SPRING_DATASOURCE_PASSWORD: secret
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      BANK_SIM_URL: http://bank-sim:8081
+      BANK_SIM_WEBHOOK_SECRET: ${BANK_SIM_WEBHOOK_SECRET:-change-me-local-only}
+      # Empty: a signing key is generated on every start and logins don't survive a restart
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
+    depends_on: [postgres, kafka]
+    restart: on-failure   # Flyway fails startup if Postgres isn't accepting connections yet
+    ports:
+      - "8080:8080"
+  bank-sim:
+    profiles: [app]
+    build:
+      context: .
+      args:
+        SERVICE: bank-sim
+    restart: on-failure
+    environment:
+      BANK_SIM_WEBHOOK_URL: http://wallet-service:8080/webhooks/bank
+      BANK_SIM_WEBHOOK_SECRET: ${BANK_SIM_WEBHOOK_SECRET:-change-me-local-only}
+    ports:
+      - "8081:8081"
+  notification-service:
+    profiles: [app]
+    build:
+      context: .
+      args:
+        SERVICE: notification-service
+    environment:
+      NOTIFICATION_DB_URL: jdbc:postgresql://postgres:5432/mydatabase
+      NOTIFICATION_DB_USER: myuser
+      NOTIFICATION_DB_PASSWORD: secret
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      WALLET_JWKS_URI: http://wallet-service:8080/.well-known/jwks.json
+    depends_on: [postgres, kafka]
+    restart: on-failure   # Flyway fails startup if Postgres isn't accepting connections yet
+    ports:
+      - "8082:8082"

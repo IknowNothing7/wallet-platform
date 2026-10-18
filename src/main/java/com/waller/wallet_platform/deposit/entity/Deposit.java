@@ -57,7 +57,7 @@ public class Deposit implements Serializable {
     @Column(nullable = false, length = 50)
     private String gateway;
 
-    @Column(name = "gateway_reference", nullable = false, length = 255)
+    @Column(name = "gateway_reference", length = 255)
     private String gatewayReference;
 
     @Enumerated(EnumType.STRING)

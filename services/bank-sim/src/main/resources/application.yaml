@@ -16,3 +16,6 @@ bank-sim:
     initial-backoff: PT1S   # doubles per failed attempt...
     max-backoff: PT1M       # ...up to this
     request-timeout: PT5S
+    resend:
+      max-requests: 5       # manual resends allowed per payment...
+      window: PT15M         # ...within this window

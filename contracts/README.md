@@ -23,8 +23,8 @@ wallet-service writes events to its outbox table; `OutboxPublisher` sends them t
 | Event | Topic | Payload |
 |---|---|---|
 | [AccountCreated](events/AccountCreated.v1.schema.json) | `wallet.account` | account |
-| [DepositCreated](events/DepositCreated.v1.schema.json) | `wallet.deposit` | deposit |
-| [TransferCreated](events/TransferCreated.v1.schema.json) | `wallet.transfer` | transfer |
+| [DepositCreated](events/DepositCreated.v1.schema.json), [DepositSucceeded](events/DepositSucceeded.v1.schema.json), [DepositFailed](events/DepositFailed.v1.schema.json), [DepositExpired](events/DepositExpired.v1.schema.json) | `wallet.deposit` | deposit |
+| [TransferCreated](events/TransferCreated.v1.schema.json), [TransferCompleted](events/TransferCompleted.v1.schema.json), [TransferFailed](events/TransferFailed.v1.schema.json), [TransferReversed](events/TransferReversed.v1.schema.json) | `wallet.transfer` | transfer |
 | [HoldCreated](events/HoldCreated.v1.schema.json), [HoldCaptured](events/HoldCaptured.v1.schema.json), [HoldReleased](events/HoldReleased.v1.schema.json), [HoldExpired](events/HoldExpired.v1.schema.json) | `wallet.hold` | hold |
 | [UserCreated](events/UserCreated.v1.schema.json) | `wallet.user` | user (contains email: PII) |
 | [JournalEntryCreated](events/JournalEntryCreated.v1.schema.json) | `wallet.journal_entry` | journal entry, without postings |

@@ -37,8 +37,31 @@ Page<Transfer> findByAccountId(@Param("accountId") Long accountId, Pageable page
 @Query("select t from Transfer t where t.id = :id")
 Optional<Transfer> findByIdForUpdate(@Param("id") Long id);
 
-// Oldest first; served by idx_transfer_pending
-@Query("select t.id from Transfer t where t.status = :status and t.createdAt < :before order by t.createdAt asc, t.id asc")
-List<Long> findIdsByStatusCreatedBefore(@Param("status") TransferStatus status, @Param("before") Instant before, Pageable page);
+// Oldest first, skipping transfers that are backing off after a failed attempt; served by idx_transfer_pending
+@Query("""
+       select t.id from Transfer t
+       where t.status = :status and t.createdAt < :before and (t.nextAttemptAt is null or t.nextAttemptAt <= :now)
+       order by t.createdAt asc, t.id asc
+       """)
+List<Long> findDueIds(@Param("status") TransferStatus status,
+                      @Param("before") Instant before,
+                      @Param("now") Instant now,
+                      Pageable page);
+
+// By createdAt, not updatedAt: every failed attempt touches updatedAt, which would hide a stuck transfer
+long countByStatusAndCreatedAtBefore(TransferStatus status, Instant before);
+
+// Null when nothing is stale
+@Query("select min(t.createdAt) from Transfer t where t.status = :status and t.createdAt < :before")
+Instant findOldestCreatedAt(@Param("status") TransferStatus status, @Param("before") Instant before);
+
+// Outgoing total for the daily limit; served by idx_transfer_from
+@Query("""
+       select coalesce(sum(t.amount), 0) from Transfer t
+       where t.fromAccount.id = :accountId and t.status = :status and t.createdAt > :since
+       """)
+long sumAmountByFromAccountIdAndStatusSince(@Param("accountId") Long accountId,
+                                            @Param("status") TransferStatus status,
+                                            @Param("since") Instant since);
 
 }

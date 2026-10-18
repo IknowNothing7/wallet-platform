@@ -1,0 +1,14 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  # Reaches wallet-platform through the host's port 8080, whether it runs via ./gradlew bootRun or the compose `app`
+  # profile; host.docker.internal is mapped in compose.yaml
+  - job_name: wallet-platform
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["host.docker.internal:8080"]

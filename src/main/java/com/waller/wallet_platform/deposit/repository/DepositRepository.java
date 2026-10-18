@@ -37,9 +37,15 @@ Page<Deposit> findByAccountIdOrderByCreatedAtDescIdDesc(Long accountId, Pageable
 @Query("select d from Deposit d where d.id = :id")
 Optional<Deposit> findByIdForUpdate(@Param("id") Long id);
 
-// Oldest first, so a backlog is worked off in order
-// TODO: idx_deposit_pending is on (status, expires_at); add one on (status, updated_at) if this gets slow
+// Oldest first, so a backlog is worked off in order; served by idx_deposit_stale
 @Query("select d from Deposit d where d.status = :status and d.updatedAt < :before order by d.updatedAt asc")
 List<Deposit> findStale(@Param("status") DepositStatus status, @Param("before") Instant before, Pageable page);
+
+// Same filter as findStale, but over all of them rather than one batch; feeds the stale-deposit gauges
+long countByStatusAndUpdatedAtBefore(DepositStatus status, Instant before);
+
+// Null when nothing is stale
+@Query("select min(d.updatedAt) from Deposit d where d.status = :status and d.updatedAt < :before")
+Instant findOldestUpdatedAt(@Param("status") DepositStatus status, @Param("before") Instant before);
 
 }

@@ -10,6 +10,7 @@ public interface HoldMapper {
 
     @Mapping(target = "accountId", source = "account.id")
     @Mapping(target = "capturedEntryId", source = "capturedEntry.id")
+    @Mapping(target = "merchantId", source = "merchant.id")
     HoldDto toDto(Hold hold);
 
 }

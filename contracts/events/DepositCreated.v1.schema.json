@@ -54,8 +54,12 @@
       "maxLength": 50
     },
     "gatewayReference": {
-      "type": "string",
-      "maxLength": 255
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 255,
+      "description": "bank-sim payment reference; null until the bank has accepted the payment"
     },
     "status": {
       "type": "string",
@@ -78,7 +82,8 @@
         "string",
         "null"
       ],
-      "format": "date-time"
+      "format": "date-time",
+      "description": "When a still-PENDING deposit is expired; null only for deposits created before it was set"
     }
   },
   "additionalProperties": true,
@@ -91,10 +96,10 @@
       "amount": 1500,
       "currency": "EUR",
       "gateway": "bank-sim",
-      "gatewayReference": "bsim_d7ed31d1-152b-4e19-abc2-db8f39c650d5",
+      "gatewayReference": null,
       "status": "PENDING",
       "failureReason": null,
-      "expiresAt": null
+      "expiresAt": "2026-10-11T09:19:42.695Z"
     }
   ]
 }

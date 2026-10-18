@@ -1,11 +1,17 @@
 package com.waller.wallet_platform.deposit.service;
 
+import java.time.Duration;
+import java.time.Instant;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import com.waller.wallet_platform.account.entity.Account;
+import com.waller.wallet_platform.account.entity.AccountStatus;
 import com.waller.wallet_platform.account.repository.AccountRepository;
 import com.waller.wallet_platform.common.web.PageResponse;
 import com.waller.wallet_platform.security.AccountAccessChecker;
@@ -30,16 +36,27 @@ public class DepositServiceImpl implements DepositService {
     private static final String AGGREGATE_TYPE = "deposit";
     private static final String DEPOSIT_CREATED = "DepositCreated";
 
+
     private final DepositMapper depositMapper;
     private final AccountAccessChecker accountAccessChecker;
     private final OutboxEventService outboxEventService;
+    private final ApplicationEventPublisher eventPublisher;
+
+    @Value("${deposit.pending-ttl:PT30M}")
+    private Duration pendingTtl;
 
     @Override
     @Transactional
     public DepositDto createDeposit(DepositRequest request) {
+        // Someone else's account gets the same 404 as a missing one, so account ids can't be probed
         Account account = accountRepository.findUserAccountById(request.getAccountId())
+                .filter(accountAccessChecker::canAccess)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "Account " + request.getAccountId() + " not found"));
+
+        if (account.getStatus() != AccountStatus.ACTIVE) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Acceptor's account is not active");
+        }
 
         if (!account.getCurrency().equals(request.getCurrency())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -48,18 +65,20 @@ public class DepositServiceImpl implements DepositService {
 
         Deposit deposit = depositMapper.requestToEntity(request);
         deposit.setAccount(account);
+        deposit.setExpiresAt(Instant.now().plus(pendingTtl));
         Deposit saved = depositRepository.save(deposit);
         log.info("Deposit {} created for account {}", saved.getId(), account.getId());
 
         DepositDto dto = depositMapper.toDto(saved);
         outboxEventService.record(AGGREGATE_TYPE, saved.getId(), DEPOSIT_CREATED, dto);
+        // Submitted to the bank by DepositSubmissionListener after this transaction commits
+        eventPublisher.publishEvent(new DepositCreatedEvent(saved.getId()));
         return dto;
     }
 
     @Override
     @Transactional(readOnly = true)
     public DepositDto getDeposit(Long id) {
-        // Someone else's deposit looks the same as a missing one, so ids can't be probed
         Deposit deposit = depositRepository.findWithAccountById(id)
                 .filter(d -> accountAccessChecker.canAccess(d.getAccount()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, DEPOSIT_NOT_FOUND));

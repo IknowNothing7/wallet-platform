@@ -5,29 +5,29 @@ import com.waller.wallet_platform.user.entity.AppUser;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.io.Decoders;
-import io.jsonwebtoken.security.Keys;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import javax.crypto.SecretKey;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 
 @Component
-@Slf4j 
+@Slf4j
+@RequiredArgsConstructor
 public class JwtTokenProvider {
 
-    @Value("${jwt.secret}")
-    private String secret;
+    private final JwtKeys keys;
 
     @Value("${jwt.lifetime}")
     private long lifetime;
 
     public String generateToken(AppUser user) {
         return Jwts.builder()
+                // Lets verifiers pick the right key from the JWKS
+                .header().keyId(keys.getKeyId()).and()
                 .id(UUID.randomUUID().toString())
                 .subject(user.getEmail())
                 .claim(AuthenticationConstants.USER_ID, user.getId())
@@ -35,7 +35,7 @@ public class JwtTokenProvider {
                 .claim(AuthenticationConstants.ROLE, List.of(user.getRole().name()))
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + lifetime))
-                .signWith(signingKey())
+                .signWith(keys.getPrivateKey(), Jwts.SIG.RS256)
                 .compact();
     }
 
@@ -63,14 +63,10 @@ public class JwtTokenProvider {
 
     private Claims parseClaims(String token) {
         return Jwts.parser()
-                .verifyWith(signingKey())
+                .verifyWith(keys.getPublicKey())
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
-    }
-
-    private SecretKey signingKey() {
-        return Keys.hmacShaKeyFor(Decoders.BASE64URL.decode(secret));
     }
 
     public String getUsername(String token) {

@@ -4,5 +4,7 @@ package com.waller.wallet_platform.bank.dto;
 public enum BankPaymentStatus {
     PENDING,
     SUCCEEDED,
-    FAILED
+    FAILED,
+    // Only after expire() cancelled it; bank-sim sends no webhook for it
+    CANCELLED
 }

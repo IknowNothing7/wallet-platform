@@ -16,7 +16,8 @@ public record HoldDto(
         HoldStatus status,
         Instant expiresAt,
         Long capturedEntryId,
-        Instant releasedAt
+        Instant releasedAt,
+        Long merchantId
 
 ) implements Serializable {
 

@@ -2,16 +2,18 @@ package com.waller.wallet_platform.deposit.service;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import com.waller.wallet_platform.account.entity.Account;
 import com.waller.wallet_platform.account.entity.AccountStatus;
@@ -23,7 +25,6 @@ import com.waller.wallet_platform.deposit.entity.Deposit;
 import com.waller.wallet_platform.deposit.entity.DepositStatus;
 import com.waller.wallet_platform.deposit.mapper.DepositMapper;
 import com.waller.wallet_platform.deposit.repository.DepositRepository;
-import com.waller.wallet_platform.deposit.service.DepositServiceImpl;
 import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import com.waller.wallet_platform.security.AccountAccessChecker;
 import com.waller.wallet_platform.user.entity.AppUser;
@@ -35,15 +36,16 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
-import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import static com.waller.wallet_platform.support.TestData.deposit;
 
-// TODO: PER_METHOD is already JUnit's default; remove @TestInstance here, in AccountServiceTest and AppUserServiceTest.
-//  Also remove the unused imports (DepositServiceImpl is in this package).
 @ExtendWith(MockitoExtension.class)
-@TestInstance(TestInstance.Lifecycle.PER_METHOD)
 public class DepositServiceTest {
 
     @Mock
@@ -60,6 +62,9 @@ public class DepositServiceTest {
 
     @Mock
     private OutboxEventService outboxEventService;
+
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks
     private DepositServiceImpl depositService;
@@ -90,87 +95,165 @@ public class DepositServiceTest {
                 .build();
 
         depositDto = DepositDto.builder()
-        .accountId(account.getId())
-        .amount(100L)
-        .currency("USD")
-        .id(2L)
-        .build();
+                .accountId(account.getId())
+                .amount(100L)
+                .currency("USD")
+                .id(2L)
+                .build();
 
-        deposit = new Deposit();
-        deposit.setAccount(account);
-        deposit.setAmount(request.getAmount());
-        deposit.setCurrency(request.getCurrency());
+        deposit = deposit(account, request.getAmount(), request.getCurrency(), DepositStatus.PENDING, null, null);
+
+        ReflectionTestUtils.setField(depositService, "pendingTtl", Duration.ofMinutes(30));
     }
 
     @Test
     void createDepositTest() {
         when(accountRepository.findUserAccountById(account.getId())).thenReturn(Optional.of(account));
+        when(accountAccessChecker.canAccess(account)).thenReturn(true);
         when(mapper.requestToEntity(request)).thenReturn(deposit);
         when(mapper.toDto(deposit)).thenReturn(depositDto);
         when(repository.save(deposit)).thenReturn(deposit);
+        Instant before = Instant.now();
         DepositDto  result = depositService.createDeposit(request);
+
+        assertThat(deposit.getExpiresAt()).isBetween(before.plus(Duration.ofMinutes(30)), Instant.now().plus(Duration.ofMinutes(30)));
 
         assertNotNull(result);
 
         assertEquals(deposit.getAccount().getId(), result.accountId());
         assertEquals(deposit.getAmount(), result.amount());
-        // TODO: Argument order is reversed (expected value goes first), so a failure message would be misleading.
-        assertEquals(deposit.getStatus(), DepositStatus.PENDING);
+        assertEquals(DepositStatus.PENDING, deposit.getStatus());
         assertEquals(deposit.getCurrency(), result.currency());
 
-        // TODO: This should be account.getId(). It passes only because the user and account ids are both 1.
-        verify(accountRepository,times(1)).findUserAccountById(appUser.getId());
+        verify(accountRepository,times(1)).findUserAccountById(account.getId());
         verify(mapper,times(1)).requestToEntity(request);
         verify(repository,times(1)).save(deposit);
         verify(outboxEventService).record("deposit", deposit.getId(), "DepositCreated", depositDto);
+        verify(eventPublisher).publishEvent(new DepositCreatedEvent(deposit.getId()));
     }
 
     @Test
     void ifAccountNotFoundThrowAnException() {
         when(accountRepository.findUserAccountById(request.getAccountId())).thenReturn(Optional.empty());
 
-                assertThatThrownBy(() -> depositService.createDeposit(request)).isInstanceOf(ResponseStatusException.class)
+        assertThatThrownBy(() -> depositService.createDeposit(request))
+                .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("Account 1 not found");
 
         verify(accountRepository,times(1)).findUserAccountById(request.getAccountId());
-        // TODO: Also verifyNoInteractions(repository, outboxEventService). Without it, a deposit saved before the
-        //  account check would still pass.
+        verifyNoInteractions(repository, outboxEventService, eventPublisher);
     }
 
-@Test
-void getAccountDeposits_returnsMappedPage() {
-    int page = 1, size = 10;
-    Pageable pageable = PageRequest.of(page, size);
-    Page<Deposit> deposits = new PageImpl<>(List.of(deposit), pageable, 11);
+    // Someone else's account answers exactly like a missing one, so account ids can't be probed
+    @Test
+    void createDeposit_someoneElsesAccount_throwsNotFoundAndSavesNothing() {
+        when(accountRepository.findUserAccountById(account.getId())).thenReturn(Optional.of(account));
+        when(accountAccessChecker.canAccess(account)).thenReturn(false);
 
-    when(accountAccessChecker.canAccess(account.getId())).thenReturn(true);
-    when(repository.findByAccountIdOrderByCreatedAtDescIdDesc(account.getId(), pageable)).thenReturn(deposits);
-    when(mapper.toDto(deposit)).thenReturn(depositDto);
+        assertThatThrownBy(() -> depositService.createDeposit(request))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND))
+                .hasMessageContaining("Account 1 not found");
 
-    PageResponse<DepositDto> result = depositService.getAccountDeposits(account.getId(), page, size);
+        verifyNoInteractions(repository, mapper, outboxEventService, eventPublisher);
+    }
 
-    assertEquals(List.of(depositDto), result.content());
-    assertEquals(page, result.page());
-    assertEquals(size, result.size());
-    assertEquals(11, result.totalElements());
-    assertEquals(2, result.totalPages());
+    @Test
+    void getAccountDeposits_returnsMappedPage() {
+        int page = 1, size = 10;
+        Pageable pageable = PageRequest.of(page, size);
+        Page<Deposit> deposits = new PageImpl<>(List.of(deposit), pageable, 11);
 
-    verify(repository).findByAccountIdOrderByCreatedAtDescIdDesc(account.getId(), pageable);
-}
+        when(accountAccessChecker.canAccess(account.getId())).thenReturn(true);
+        when(repository.findByAccountIdOrderByCreatedAtDescIdDesc(account.getId(), pageable)).thenReturn(deposits);
+        when(mapper.toDto(deposit)).thenReturn(depositDto);
 
-@Test
-void getAccountDeposits_noAccess_throwsNotFound() {
-    when(accountAccessChecker.canAccess(account.getId())).thenReturn(false);
+        PageResponse<DepositDto> result = depositService.getAccountDeposits(account.getId(), page, size);
 
-    assertThatThrownBy(() -> depositService.getAccountDeposits(account.getId(), 0, 10))
-            .isInstanceOf(ResponseStatusException.class)
-            .hasMessageContaining("Account not found");
+        assertEquals(List.of(depositDto), result.content());
+        assertEquals(page, result.page());
+        assertEquals(size, result.size());
+        assertEquals(11, result.totalElements());
+        assertEquals(2, result.totalPages());
 
-    verifyNoInteractions(repository, mapper);
-}
+        verify(repository).findByAccountIdOrderByCreatedAtDescIdDesc(account.getId(), pageable);
+    }
 
-// TODO: Missing cases: currency mismatch (400, nothing saved), and getDeposit for your own deposit, someone else's,
-//  and a missing one. Also reformat the last two tests; their indentation is off.
-// TODO: createDeposit doesn't check account status (HoldServiceImpl rejects non-ACTIVE accounts). Decide whether
-//  deposits into a FROZEN account should be allowed, then add a test either way.
+    @Test
+    void getAccountDeposits_noAccess_throwsNotFound() {
+        when(accountAccessChecker.canAccess(account.getId())).thenReturn(false);
+
+        assertThatThrownBy(() -> depositService.getAccountDeposits(account.getId(), 0, 10))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("Account not found");
+
+        verifyNoInteractions(repository, mapper);
+    }
+
+    @Test
+    void createDeposit_currencyMismatch_throwsBadRequestAndSavesNothing() {
+        request.setCurrency("EUR");
+        when(accountRepository.findUserAccountById(account.getId())).thenReturn(Optional.of(account));
+        when(accountAccessChecker.canAccess(account)).thenReturn(true);
+
+        assertThatThrownBy(() -> depositService.createDeposit(request))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST))
+                .hasMessageContaining("does not match account currency USD");
+
+        verifyNoInteractions(repository, mapper, outboxEventService, eventPublisher);
+    }
+
+    // Deposits go only into ACTIVE accounts, like holds (HoldServiceImpl)
+    @Test
+    void createDeposit_frozenAccount_throwsForbiddenAndSavesNothing() {
+        account.setStatus(AccountStatus.FROZEN);
+        when(accountRepository.findUserAccountById(account.getId())).thenReturn(Optional.of(account));
+        when(accountAccessChecker.canAccess(account)).thenReturn(true);
+
+        assertThatThrownBy(() -> depositService.createDeposit(request))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN))
+                .hasMessageContaining("not active");
+
+        verifyNoInteractions(repository, mapper, outboxEventService, eventPublisher);
+    }
+
+    @Test
+    void getDeposit_ownDeposit_returnsDto() {
+        deposit.setId(2L);
+        when(repository.findWithAccountById(2L)).thenReturn(Optional.of(deposit));
+        when(accountAccessChecker.canAccess(account)).thenReturn(true);
+        when(mapper.toDto(deposit)).thenReturn(depositDto);
+
+        DepositDto result = depositService.getDeposit(2L);
+
+        assertThat(result).isEqualTo(depositDto);
+    }
+
+    @Test
+    void getDeposit_someoneElsesDeposit_throwsNotFound() {
+        deposit.setId(2L);
+        when(repository.findWithAccountById(2L)).thenReturn(Optional.of(deposit));
+        when(accountAccessChecker.canAccess(account)).thenReturn(false);
+
+        assertThatThrownBy(() -> depositService.getDeposit(2L))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND))
+                .hasMessageContaining("Deposit not found");
+
+        verifyNoInteractions(mapper);
+    }
+
+    @Test
+    void getDeposit_missing_throwsNotFound() {
+        when(repository.findWithAccountById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> depositService.getDeposit(99L))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND))
+                .hasMessageContaining("Deposit not found");
+
+        verifyNoInteractions(accountAccessChecker, mapper);
+    }
 }

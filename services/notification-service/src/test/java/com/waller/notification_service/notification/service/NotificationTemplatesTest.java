@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.tuple;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -22,6 +23,20 @@ class NotificationTemplatesTest {
         assertThat(templates.render(event("DepositCreated", "{\"accountId\": 10, \"amount\": 12345, \"currency\": \"USD\"}")))
                 .extracting(NotificationDraft::accountId, NotificationDraft::title, NotificationDraft::body)
                 .containsExactly(tuple(10L, "Top-up started", "Top-up of 123.45 USD is being processed"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "DepositSucceeded, Top-up completed, Top-up of 15.00 EUR completed",
+            "DepositFailed, Top-up failed, Top-up of 15.00 EUR was declined by the bank",
+            "DepositExpired, Top-up timed out, Top-up of 15.00 EUR was not confirmed by the bank in time"
+    })
+    void depositOutcome_notifiesAccountOwner(String eventType, String title, String body) {
+        String payload = "{\"accountId\": 7, \"amount\": 1500, \"currency\": \"EUR\", \"failureReason\": \"Declined by issuer\"}";
+
+        assertThat(templates.render(event(eventType, payload)))
+                .extracting(NotificationDraft::accountId, NotificationDraft::title, NotificationDraft::body)
+                .containsExactly(tuple(7L, title, body));
     }
 
     @Test

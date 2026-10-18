@@ -12,6 +12,7 @@ import com.waller.bank_sim.control.service.ScenarioService;
 import com.waller.bank_sim.payment.dto.PaymentDto;
 import com.waller.bank_sim.payment.dto.PaymentRequest;
 import com.waller.bank_sim.payment.model.Payment;
+import com.waller.bank_sim.payment.model.PaymentStatus;
 import com.waller.bank_sim.payment.repository.PaymentStore;
 import com.waller.bank_sim.webhook.service.WebhookSender;
 
@@ -21,6 +22,8 @@ import com.waller.bank_sim.webhook.service.WebhookSender;
 public class PaymentServiceImpl implements PaymentService {
 
     private static final String PAYMENT_NOT_FOUND = "Payment not found";
+    private static final String CANCELLED = "Cancelled by merchant";
+    private static final String KEY_REUSED = "Idempotency key was already used for a different payment";
 
     private final PaymentStore paymentStore;
     private final ScenarioService scenarioService;
@@ -39,7 +42,10 @@ public class PaymentServiceImpl implements PaymentService {
             return created;
         });
 
-        // TODO: reject a reused key whose amount/currency differ from the original request (422)
+        // A retry must be the same request; anything else is a client bug, not a second payment
+        if (!matches(payment, request)) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_CONTENT, KEY_REUSED);
+        }
 
         // Fault injection after storing: the payment exists but the response is "lost", so a retry
         // must hit the idempotency key instead of creating a second top-up
@@ -55,10 +61,26 @@ public class PaymentServiceImpl implements PaymentService {
     }
 
     @Override
+    public PaymentDto cancelPayment(String reference) {
+        Payment payment = paymentStore.findByReference(reference)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, PAYMENT_NOT_FOUND));
+        if (payment.settle(PaymentStatus.CANCELLED, CANCELLED)) {
+            log.info("Cancelled payment {} for deposit {}", payment.getReference(), payment.getWalletDepositId());
+        }
+        return PaymentDto.of(payment);
+    }
+
+    @Override
     public List<PaymentDto> getPayments() {
         return paymentStore.findAll().stream()
                 .sorted(Comparator.comparing(Payment::getCreatedAt).reversed())
                 .map(PaymentDto::of)
                 .toList();
+    }
+
+    private static boolean matches(Payment payment, PaymentRequest request) {
+        return payment.getAmount() == request.amount()
+                && payment.getCurrency().equals(request.currency())
+                && payment.getWalletDepositId().equals(request.walletDepositId());
     }
 }

@@ -28,4 +28,15 @@ public class Payment {
         this.currency = currency;
         this.walletDepositId = walletDepositId;
     }
+
+    /** Gives a PENDING payment its final status; false if it already has one, e.g. it was cancelled first. */
+    public synchronized boolean settle(PaymentStatus finalStatus, String reason) {
+        if (status != PaymentStatus.PENDING) {
+            return false;
+        }
+        // Reason first: readers check status, so they never see a final status without its reason
+        failureReason = reason;
+        status = finalStatus;
+        return true;
+    }
 }

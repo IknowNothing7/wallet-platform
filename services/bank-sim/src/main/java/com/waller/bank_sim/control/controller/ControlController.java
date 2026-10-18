@@ -20,7 +20,6 @@ import com.waller.bank_sim.payment.repository.PaymentStore;
 import com.waller.bank_sim.payment.service.PaymentService;
 import com.waller.bank_sim.webhook.service.WebhookSender;
 
-// For tests and demos only; must not be reachable through the public ingress
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/control")

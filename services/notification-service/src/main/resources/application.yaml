@@ -26,9 +26,18 @@ spring:
       group-id: notification-service
       auto-offset-reset: earliest
       enable-auto-commit: false
+      properties:
+        # How often the topic pattern is re-matched. The outbox creates wallet.<aggregate_type> topics on first publish,
+        # so with the 5-minute default a fresh stack sees no events for up to 5 minutes
+        metadata.max.age.ms: 10000
     listener:
       # Offsets are committed only after the handler's transaction commits
       ack-mode: record
+    # Only used by the DLT publisher: it forwards the record as consumed (String key and value)
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
 
   security:
     oauth2:
@@ -40,8 +49,13 @@ server:
   port: ${SERVER_PORT:8082}
 
 notification:
+  jwks:
+    cache-ttl: PT5M               # how long fetched keys are used before they are refetched
+    min-refresh-interval: PT30S   # an unknown kid refetches at most this often
+
   consumer:
-    topic-pattern: wallet\..*   # every topic the wallet outbox publishes to
+    # Every wallet.<aggregate_type> topic the outbox publishes to, but not the <topic>.DLT dead-letter topics
+    topic-pattern: wallet\.[a-z_]+
     initial-backoff: PT1S
     max-backoff: PT1M
     max-attempts: 8             # then the record goes to <topic>.DLT
