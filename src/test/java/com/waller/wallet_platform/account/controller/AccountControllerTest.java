@@ -56,17 +56,17 @@ class AccountControllerTest extends IntegrationTest {
                 account(currentUser, 0, "USD"),
                 account(currentUser, 10000, "VND"),
                 account(anotherUser, 999, "EUR"),
-                account(currentUser, 50, "USD")));
+                account(currentUser, 50, "EUR")));
 
         given()
                 .auth().oauth2(jwtTokenProvider.generateToken(currentUser))
         .when()
-                .get("/account")
+                .get("/api/accounts")
         .then()
                 .statusCode(200)
                 .body("success", equalTo(true))
                 .body("payload", hasSize(3))
-                .body("payload.currency", contains("USD", "VND", "USD"))
+                .body("payload.currency", contains("USD", "VND", "EUR"))
                 .body("payload.balance", contains(0, 10000, 50))
                 .body("payload.userId", everyItem(equalTo(currentUser.getId().intValue())));
     }
@@ -75,7 +75,7 @@ class AccountControllerTest extends IntegrationTest {
     void anonymousIsUnauthorized() {
         given()
         .when()
-                .get("/account")
+                .get("/api/accounts")
         .then()
                 .statusCode(401);
     }
@@ -88,7 +88,7 @@ class AccountControllerTest extends IntegrationTest {
         given()
                 .auth().oauth2(jwtTokenProvider.generateToken(owner))
         .when()
-                .get("/account/" + account.getId())
+                .get("/api/accounts/" + account.getId())
         .then()
                 .statusCode(200)
                 .body("success", equalTo(true))
@@ -107,7 +107,7 @@ class AccountControllerTest extends IntegrationTest {
         given()
                 .auth().oauth2(jwtTokenProvider.generateToken(admin))
         .when()
-                .get("/account/" + account.getId())
+                .get("/api/accounts/" + account.getId())
         .then()
                 .statusCode(200)
                 .body("success", equalTo(true))
@@ -124,7 +124,7 @@ class AccountControllerTest extends IntegrationTest {
         given()
                 .auth().oauth2(jwtTokenProvider.generateToken(another))
         .when()
-                .get("/account/" + account.getId())
+                .get("/api/accounts/" + account.getId())
         .then()
                 .statusCode(404)
                 .body("success", equalTo(false));
@@ -138,7 +138,7 @@ class AccountControllerTest extends IntegrationTest {
         given()
                 .auth().oauth2(jwtTokenProvider.generateToken(admin))
         .when()
-                .get("/account/" + systemAccount.getId())
+                .get("/api/accounts/" + systemAccount.getId())
         .then()
                 .statusCode(404)
                 .body("success", equalTo(false));
@@ -153,7 +153,7 @@ class AccountControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(Map.of("currency", "USD"))
         .when()
-                .post("/account/create")
+                .post("/api/accounts")
         .then()
                 .statusCode(201)
                 .body("success", equalTo(true))
@@ -184,7 +184,7 @@ class AccountControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(Map.of("currency", "USD"))
         .when()
-                .post("/account/create")
+                .post("/api/accounts")
         .then()
                 .statusCode(401);
 
@@ -200,7 +200,7 @@ class AccountControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(Map.of("currency", "usd"))
         .when()
-                .post("/account/create")
+                .post("/api/accounts")
         .then()
                 .statusCode(400)
                 .body("success", equalTo(false))

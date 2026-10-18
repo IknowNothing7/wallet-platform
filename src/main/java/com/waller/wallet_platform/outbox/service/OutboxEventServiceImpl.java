@@ -7,10 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import tools.jackson.databind.json.JsonMapper;
 import com.waller.wallet_platform.common.web.PageResponse;
 import com.waller.wallet_platform.common.util.ApiUtils;
 import lombok.RequiredArgsConstructor;
@@ -29,11 +26,9 @@ public class OutboxEventServiceImpl implements OutboxEventService {
 
     private static final String EVENT_NOT_FOUND = "Outbox event not found";
 
-    // Jackson 2, to match OutboxEvent.payload; Boot 4 only auto-configures a Jackson 3 mapper
-    private static final ObjectMapper PAYLOAD_MAPPER = JsonMapper.builder()
-            .addModule(new JavaTimeModule())
-            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
-            .build();
+    // Jackson 3's defaults already write java.time values as ISO-8601 strings, as the contracts require. A mapper of
+    // its own rather than Boot's, so web settings (e.g. spring.jackson.*) can't change the event format.
+    private static final JsonMapper PAYLOAD_MAPPER = JsonMapper.builder().build();
 
     private final OutboxRepository outboxRepository;
     private final OutboxEventMapper outboxEventMapper;

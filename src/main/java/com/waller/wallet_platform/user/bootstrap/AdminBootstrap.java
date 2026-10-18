@@ -9,7 +9,7 @@ import com.waller.wallet_platform.user.service.AppUserService;
 
 /**
  * The only way to get an ADMIN: on startup, creates one from ADMIN_EMAIL / ADMIN_PASSWORD (admin.bootstrap.*) if no
- * user has that email yet. That admin then makes merchants through PUT /user/{id}/role. Without ADMIN_EMAIL it does
+ * user has that email yet. That admin then makes merchants through PUT /api/users/{id}/role. Without ADMIN_EMAIL it does
  * nothing. A weak password fails startup rather than leaving the platform without an admin.
  *
  * <p>Several instances starting at once are safe: the unique email lets only one insert win, and the others fail

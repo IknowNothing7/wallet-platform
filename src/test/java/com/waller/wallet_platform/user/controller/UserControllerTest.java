@@ -49,7 +49,7 @@ class UserControllerTest extends IntegrationTest {
         given()
                 .auth().oauth2(jwtTokenProvider.generateToken(admin))
         .when()
-                .get("/user")
+                .get("/api/users")
         .then()
                 .statusCode(200)
                 .body("success", equalTo(true))
@@ -65,7 +65,7 @@ class UserControllerTest extends IntegrationTest {
         given()
                 .auth().oauth2(jwtTokenProvider.generateToken(alice))
         .when()
-                .get("/user")
+                .get("/api/users")
         .then()
                 .statusCode(403);
     }
@@ -74,7 +74,7 @@ class UserControllerTest extends IntegrationTest {
     void anonymousIsUnauthorized() {
         given()
         .when()
-                .get("/user")
+                .get("/api/users")
         .then()
                 .statusCode(401);
     }
@@ -117,7 +117,7 @@ class UserControllerTest extends IntegrationTest {
                 .body(Map.of("accountId", 999_999, "amount", 100, "currency", "USD",
                         "expiresAt", Instant.now().plus(Duration.ofHours(1)).toString()))
         .when()
-                .post("/hold/create")
+                .post("/api/holds")
         .then()
                 .statusCode(404);
     }
@@ -183,7 +183,7 @@ class UserControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(Map.of("role", role))
         .when()
-                .put("/user/{id}/role", userId)
+                .put("/api/users/{id}/role", userId)
         .then();
     }
 
@@ -199,7 +199,7 @@ class UserControllerTest extends IntegrationTest {
                 .queryParam("page", 1)
                 .queryParam("size", 2)
         .when()
-                .get("/user")
+                .get("/api/users")
         .then()
                 .statusCode(200)
                 .body("payload.page", equalTo(1))
@@ -217,7 +217,7 @@ class UserControllerTest extends IntegrationTest {
                 .auth().oauth2(jwtTokenProvider.generateToken(admin))
                 .queryParam("size", 101)
         .when()
-                .get("/user")
+                .get("/api/users")
         .then()
                 .statusCode(400)
                 .body("success", equalTo(false))
@@ -233,7 +233,7 @@ class UserControllerTest extends IntegrationTest {
                 .auth().oauth2(jwtTokenProvider.generateToken(admin))
                 .queryParam("username", "ALI")
         .when()
-                .get("/user")
+                .get("/api/users")
         .then()
                 .statusCode(200)
                 // Default order is by id: Alicia was saved before Alice
@@ -248,7 +248,7 @@ class UserControllerTest extends IntegrationTest {
                 .auth().oauth2(jwtTokenProvider.generateToken(admin))
                 .queryParam("email", "@shop.com")
         .when()
-                .get("/user")
+                .get("/api/users")
         .then()
                 .statusCode(200)
                 .body("payload.totalElements", equalTo(2))
@@ -264,7 +264,7 @@ class UserControllerTest extends IntegrationTest {
                 .auth().oauth2(jwtTokenProvider.generateToken(admin))
                 .queryParam("keyword", "carol")
         .when()
-                .get("/user")
+                .get("/api/users")
         .then()
                 .statusCode(200)
                 .body("payload.content.email", contains("carol@shop.com"));
@@ -274,7 +274,7 @@ class UserControllerTest extends IntegrationTest {
                 .queryParam("username", "ali")
                 .queryParam("email", "shop")
         .when()
-                .get("/user")
+                .get("/api/users")
         .then()
                 .statusCode(200)
                 .body("payload.content.name", contains("Alicia"));
@@ -289,7 +289,7 @@ class UserControllerTest extends IntegrationTest {
                 .auth().oauth2(jwtTokenProvider.generateToken(admin))
                 .queryParam("username", "_")
         .when()
-                .get("/user")
+                .get("/api/users")
         .then()
                 .statusCode(200)
                 .body("payload.content", hasSize(0));
@@ -303,7 +303,7 @@ class UserControllerTest extends IntegrationTest {
                 .auth().oauth2(jwtTokenProvider.generateToken(admin))
                 .queryParam("sortField", "EMAIL")
         .when()
-                .get("/user")
+                .get("/api/users")
         .then()
                 .statusCode(200)
                 .body("payload.content.email", contains(
@@ -313,7 +313,7 @@ class UserControllerTest extends IntegrationTest {
                 .auth().oauth2(jwtTokenProvider.generateToken(admin))
                 .queryParam("sortField", "NAME")
         .when()
-                .get("/user")
+                .get("/api/users")
         .then()
                 .statusCode(200)
                 .body("payload.content.name", contains("Admin", "Alice", "Alicia", "Bob", "Carol"));
@@ -327,7 +327,7 @@ class UserControllerTest extends IntegrationTest {
                 .auth().oauth2(jwtTokenProvider.generateToken(admin))
                 .queryParam("sortField", "PASSWORD")
         .when()
-                .get("/user")
+                .get("/api/users")
         .then()
                 .statusCode(400)
                 .body("success", equalTo(false));
@@ -341,7 +341,7 @@ class UserControllerTest extends IntegrationTest {
                 .auth().oauth2(jwtTokenProvider.generateToken(admin))
                 .queryParam("keyword", "a".repeat(101))
         .when()
-                .get("/user")
+                .get("/api/users")
         .then()
                 .statusCode(400)
                 .body("success", equalTo(false))

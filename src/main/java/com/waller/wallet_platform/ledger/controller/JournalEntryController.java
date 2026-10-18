@@ -20,26 +20,26 @@ import com.waller.wallet_platform.ledger.service.JournalEntryService;
 // transfer, deposit or hold capture (LedgerService).
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/journal-entry")
+@RequestMapping("/api")
 @PreAuthorize("hasRole('ADMIN')")
 public class JournalEntryController {
 
     private final JournalEntryService journalEntryService;
 
-    @GetMapping("/{id}")
+    @GetMapping("/journal-entries/{id}")
     public ApiResponse<JournalEntryDto> getJournalEntry(@PathVariable("id") Long id) {
         return ApiResponse.ok(journalEntryService.getJournalEntry(id));
     }
 
-    @GetMapping
+    @GetMapping("/journal-entries")
     public ApiResponse<PageResponse<JournalEntryDto>> getJournalEntries(
             @RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
             @RequestParam(name = "size", defaultValue = "20") @Min(1) @Max(100) int size) {
         return ApiResponse.ok(journalEntryService.getJournalEntries(page, size));
     }
 
-    // e.g. /journal-entry/reference?type=transfer&id=42
-    @GetMapping("/reference")
+    // e.g. /api/journal-entries/reference?type=transfer&id=42
+    @GetMapping("/journal-entries/reference")
     public ApiResponse<ArrayList<JournalEntryDto>> getJournalEntriesByReference(
             @RequestParam("type") String type,
             @RequestParam("id") Long id) {

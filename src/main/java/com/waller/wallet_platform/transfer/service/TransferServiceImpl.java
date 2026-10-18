@@ -25,7 +25,7 @@ public class TransferServiceImpl implements TransferService {
 
     private static final String TRANSFER_NOT_FOUND = "Transfer not found";
     private static final String ACCOUNT_NOT_FOUND = "Account not found";
-    private static final String CREATE_ENDPOINT = "POST /transfer/create";
+    private static final String CREATE_ENDPOINT = "POST /api/transfers";
 
     private final TransferRepository transferRepository;
     private final TransferMapper transferMapper;

@@ -20,26 +20,26 @@ import com.waller.wallet_platform.outbox.entity.OutboxStatus;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/outbox")
+@RequestMapping("/api")
 @PreAuthorize("hasRole('ADMIN')")
 @Slf4j
 public class OutboxEventController {
 
     private final OutboxEventService outboxEventService;
 
-    @GetMapping("/{id}")
+    @GetMapping("/outbox-events/{id}")
     public ApiResponse<OutboxEventDto> getEvent(@PathVariable("id") Long id) {
         return ApiResponse.ok(outboxEventService.getEvent(id));
     }
 
     // 409 if the event isn't FAILED
-    @PostMapping("/{id}/retry")
+    @PostMapping("/outbox-events/{id}/retry")
     public ApiResponse<OutboxEventDto> retryEvent(@PathVariable("id") Long id) {
         return ApiResponse.ok(outboxEventService.retryEvent(id));
     }
 
-    // e.g. /outbox?status=FAILED
-    @GetMapping
+    // e.g. /api/outbox-events?status=FAILED
+    @GetMapping("/outbox-events")
     public ApiResponse<PageResponse<OutboxEventDto>> getEvents(
             @RequestParam(name = "status", required = false) OutboxStatus status,
             @RequestParam(name = "page", defaultValue = "0") @Min(0) int page,

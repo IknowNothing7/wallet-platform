@@ -19,7 +19,7 @@ import com.waller.wallet_platform.transfer.service.TransferService;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/transfer")
+@RequestMapping("/api")
 @Slf4j
 public class TransferController {
 
@@ -27,12 +27,12 @@ public class TransferController {
     private final TransferProcessingService transferProcessingService;
 
 
-    @GetMapping("/{id}")
+    @GetMapping("/transfers/{id}")
     public ApiResponse<TransferDto> getTransfer(@PathVariable("id") Long id) {
         return ApiResponse.ok(transferService.getTransfer(id));
     }
 
-    @GetMapping("/account/{accountId}")
+    @GetMapping("/accounts/{accountId}/transfers")
     public ApiResponse<PageResponse<TransferDto>> getAccountTransfers(
             @PathVariable("accountId") Long accountId,
             @RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
@@ -40,7 +40,7 @@ public class TransferController {
         return ApiResponse.ok(transferService.getAccountTransfers(accountId, page, size));
     }
 
-    @PostMapping("/create")
+    @PostMapping("/transfers")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<TransferDto> createTransfer(
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
@@ -49,7 +49,7 @@ public class TransferController {
         return ApiResponse.ok(transferService.createTransfer(request, idempotencyKey));
     }
 
-    @PostMapping("/{id}/reverse")
+    @PostMapping("/transfers/{id}/reverse")
     @ResponseStatus(HttpStatus.ACCEPTED)
     @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<TransferDto> reverseTransfer(

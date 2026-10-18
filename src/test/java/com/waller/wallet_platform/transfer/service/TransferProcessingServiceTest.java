@@ -46,6 +46,7 @@ import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import com.waller.wallet_platform.transfer.dto.TransferDto;
 import com.waller.wallet_platform.transfer.dto.TransferRequest;
 import com.waller.wallet_platform.transfer.entity.Transfer;
+import com.waller.wallet_platform.transfer.entity.TransferLimit;
 import com.waller.wallet_platform.transfer.entity.TransferStatus;
 import com.waller.wallet_platform.transfer.mapper.TransferMapper;
 import com.waller.wallet_platform.transfer.repository.TransferLimitRepository;
@@ -336,11 +337,13 @@ class TransferProcessingServiceTest {
         return new TransferRequest(1L, 2L, amount, "USD");
     }
 
-    // Both accounts lockable, no limit row applies (the mock returns empty Optionals); the first save gives the new
+    // Both accounts lockable, an unlimited USD limit row applies; the first save gives the new
     // transfer id 10, and the dto mirrors the transfer at save time, so the result shows its final state
     private void stubBookable() {
         when(accountRepository.findUserAccountByIdForUpdate(1L)).thenReturn(Optional.of(from));
         when(accountRepository.findUserAccountByIdForUpdate(2L)).thenReturn(Optional.of(to));
+        // Not reached when the balance check already rejects the transfer
+        lenient().when(transferLimitRepository.findByCurrency("USD")).thenReturn(Optional.of(new TransferLimit()));
         when(transferRepository.saveAndFlush(ArgumentMatchers.<Transfer>any())).thenAnswer(invocation -> {
             Transfer transfer = invocation.getArgument(0);
             transfer.setId(10L);

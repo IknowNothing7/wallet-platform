@@ -20,17 +20,17 @@ import com.waller.wallet_platform.ledger.dto.PostingDto;
 // Read-only, like JournalEntryController: postings are written only by LedgerService
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/posting")
+@RequestMapping("/api")
 public class PostingController {
 
     private final PostingService postingService;
 
-    @GetMapping("/{id}")
+    @GetMapping("/postings/{id}")
     public ApiResponse<PostingDto> getPosting(@PathVariable("id") Long id) {
         return ApiResponse.ok(postingService.getPosting(id));
     }
 
-    @GetMapping("/account/{accountId}")
+    @GetMapping("/accounts/{accountId}/postings")
     public ApiResponse<PageResponse<PostingDto>> getAccountPostings(
             @PathVariable("accountId") Long accountId,
             @RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
@@ -38,7 +38,7 @@ public class PostingController {
         return ApiResponse.ok(postingService.getAccountPostings(accountId, page, size));
     }
 
-    @GetMapping("/journal-entry/{journalEntryId}")
+    @GetMapping("/journal-entries/{journalEntryId}/postings")
     @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<ArrayList<PostingDto>> getJournalEntryPostings(@PathVariable("journalEntryId") Long journalEntryId) {
         List<PostingDto> postings = postingService.getJournalEntryPostings(journalEntryId);

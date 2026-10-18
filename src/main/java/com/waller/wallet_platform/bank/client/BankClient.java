@@ -15,6 +15,9 @@ import com.waller.wallet_platform.bank.dto.BankPaymentRequest;
 /**
  * HTTP client for bank-sim. Never call it inside a transaction: the call can take up to the request timeout
  * (longer with bank-sim's latency scenario) and would hold a database connection and row locks meanwhile.
+ *
+ * <p>A timeout and no retries, on purpose: DepositReconciliationJob retries, reusing the deposit's idempotency key,
+ * so a repeat can never pay twice. See docs/decisions.md, "Talking to the bank".
  */
 @Component
 @Slf4j

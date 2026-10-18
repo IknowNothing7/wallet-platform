@@ -5,20 +5,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.Mockito.inOrder;
+import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -38,7 +38,6 @@ import com.waller.wallet_platform.ledger.mapper.JournalEntryMapper;
 import com.waller.wallet_platform.ledger.mapper.PostingMapper;
 import com.waller.wallet_platform.ledger.repository.JournalEntryRepository;
 import com.waller.wallet_platform.ledger.repository.PostingRepository;
-import com.waller.wallet_platform.outbox.service.OutboxEventService;
 
 @ExtendWith(MockitoExtension.class)
 class LedgerServiceImplTest {
@@ -58,9 +57,6 @@ class LedgerServiceImplTest {
     @Mock
     private PostingMapper postingMapper;
 
-    @Mock
-    private OutboxEventService outboxEventService;
-
     @InjectMocks
     private LedgerServiceImpl ledgerService;
 
@@ -77,46 +73,42 @@ class LedgerServiceImplTest {
     }
 
     @Test
-    void post_writesEntryThenBalancesThenPostings() {
-        stubAccounts(user, bankClearing);
+    void post_changesTheLockedBalancesAndWritesPostings() {
+        bankClearing.setBalance(-500L);
+        user.setBalance(500L);
+        stubLocked(user, bankClearing);
         stubWrites();
-        when(accountRepository.applyBalanceDelta(anyLong(), anyLong())).thenReturn(1);
 
         ledgerService.post(entry(
                 line(1L, PostingDirection.DEBIT, 100),
                 line(10L, PostingDirection.CREDIT, 100)));
 
-        verify(accountRepository).applyBalanceDelta(1L, -100);
-        verify(accountRepository).applyBalanceDelta(10L, 100);
+        assertThat(bankClearing.getBalance()).isEqualTo(-600L);
+        assertThat(user.getBalance()).isEqualTo(600L);
         verify(postingRepository).saveAll(anyList());
     }
 
-    // User rows before system rows: a transfer arrives holding its user rows and then wants FEES, so a deposit
-    // must not hold FEES while waiting for a user row
+    // Every account of the entry in one locking query, whose order (users, then system) the repository applies
     @Test
-    void post_updatesUserAccountsBeforeSystemAccounts() {
-        stubAccounts(user, bankClearing, fees);
+    void post_locksEveryAccountOfTheEntryInOneOrderedQuery() {
+        stubLocked(user, bankClearing, fees);
         stubWrites();
-        when(accountRepository.applyBalanceDelta(anyLong(), anyLong())).thenReturn(1);
 
         ledgerService.post(entry(
                 line(1L, PostingDirection.DEBIT, 100),
                 line(10L, PostingDirection.CREDIT, 98),
                 line(2L, PostingDirection.CREDIT, 2)));
 
-        InOrder order = inOrder(accountRepository);
-        order.verify(accountRepository).applyBalanceDelta(10L, 98);
-        order.verify(accountRepository).applyBalanceDelta(1L, -100);
-        order.verify(accountRepository).applyBalanceDelta(2L, 2);
+        verify(accountRepository).findAllByIdForUpdateInLockOrder(Set.of(1L, 2L, 10L), AccountType.SYSTEM);
+        verifyNoMoreInteractions(accountRepository);
     }
 
-    // The conditional UPDATE matched no row: the user account would have gone negative
     @Test
-    void post_userAccountWouldGoNegative_throwsConflictAndWritesNoPostings() {
+    void post_userAccountWouldGoNegative_throwsConflictAndChangesNothing() {
         Account other = account(11L, "USD");
-        stubAccounts(user, other);
-        stubWrites();
-        when(accountRepository.applyBalanceDelta(10L, -100)).thenReturn(0);
+        other.setBalance(0L);
+        user.setBalance(99L);
+        stubLocked(user, other);
 
         assertThatThrownBy(() -> ledgerService.post(entry(
                 line(10L, PostingDirection.DEBIT, 100),
@@ -125,7 +117,23 @@ class LedgerServiceImplTest {
                         e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.CONFLICT))
                 .hasMessageContaining("Insufficient funds");
 
-        verify(postingRepository, never()).saveAll(anyList());
+        assertThat(user.getBalance()).isEqualTo(99L);
+        assertThat(other.getBalance()).isZero();
+        verifyNoInteractions(journalEntryRepository, postingRepository);
+    }
+
+    @Test
+    void post_systemAccountMayGoNegative() {
+        bankClearing.setBalance(0L);
+        user.setBalance(0L);
+        stubLocked(user, bankClearing);
+        stubWrites();
+
+        ledgerService.post(entry(
+                line(1L, PostingDirection.DEBIT, 100),
+                line(10L, PostingDirection.CREDIT, 100)));
+
+        assertThat(bankClearing.getBalance()).isEqualTo(-100L);
     }
 
     @Test
@@ -165,38 +173,39 @@ class LedgerServiceImplTest {
 
     @Test
     void post_unknownAccount_isRefusedBeforeAnythingIsWritten() {
-        stubAccounts(user);
+        stubLocked(user);
 
         assertThatThrownBy(() -> ledgerService.post(entry(
                 line(1L, PostingDirection.DEBIT, 100),
                 line(10L, PostingDirection.CREDIT, 100))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Account 1 does not exist");
-        verifyNoInteractions(journalEntryRepository, postingRepository, outboxEventService);
+        verifyNoInteractions(journalEntryRepository, postingRepository);
     }
 
     @Test
     void post_currencyOfAnotherAccount_isRefusedBeforeAnythingIsWritten() {
         Account eur = account(11L, "EUR");
-        stubAccounts(user, eur);
+        stubLocked(user, eur);
 
         assertThatThrownBy(() -> ledgerService.post(entry(
                 line(10L, PostingDirection.DEBIT, 100),
                 line(11L, PostingDirection.CREDIT, 100))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Posting currency does not match account 11");
-        verifyNoInteractions(journalEntryRepository, postingRepository, outboxEventService);
+        verifyNoInteractions(journalEntryRepository, postingRepository);
     }
 
     private void assertRefused(String message, PostingRequest... lines) {
         assertThatThrownBy(() -> ledgerService.post(entry(lines)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining(message);
-        verifyNoInteractions(journalEntryRepository, accountRepository, postingRepository, outboxEventService);
+        verifyNoInteractions(journalEntryRepository, accountRepository, postingRepository);
     }
 
-    private void stubAccounts(Account... accounts) {
-        when(accountRepository.findAllById(anyList())).thenReturn(List.of(accounts));
+    private void stubLocked(Account... accounts) {
+        when(accountRepository.findAllByIdForUpdateInLockOrder(anyCollection(), eq(AccountType.SYSTEM)))
+                .thenReturn(List.of(accounts));
     }
 
     private void stubWrites() {

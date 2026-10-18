@@ -1,11 +1,9 @@
 package com.waller.wallet_platform.ledger.service;
 
-import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -25,17 +23,24 @@ import com.waller.wallet_platform.ledger.mapper.JournalEntryMapper;
 import com.waller.wallet_platform.ledger.mapper.PostingMapper;
 import com.waller.wallet_platform.ledger.repository.JournalEntryRepository;
 import com.waller.wallet_platform.ledger.repository.PostingRepository;
-import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import lombok.RequiredArgsConstructor;
 
-// Package-private: the rest of the application sees only LedgerService
+/**
+ * Package-private: the rest of the application sees only LedgerService.
+ *
+ * <p>Locking: every account of the entry is row-locked here (SELECT ... FOR UPDATE), user accounts first, then system
+ * accounts, each by id. That is the one locking strategy for money: every caller inherits it, and a caller that
+ * needs to check something first (a transfer's available balance, a capture's destination) locks its user accounts
+ * the same way beforehand, so re-locking them here is a no-op and the order still holds. @Version on Account only
+ * guards against a write that bypasses this path.
+ *
+ * <p>No events: the ledger is an internal record. Each business operation publishes its own event (TransferCompleted,
+ * DepositSucceeded, HoldCaptured) in the same transaction.
+ */
 @Service
 @RequiredArgsConstructor
 class LedgerServiceImpl implements LedgerService {
 
-    private static final String AGGREGATE_TYPE = "journal_entry";
-    private static final String JOURNAL_ENTRY_CREATED = "JournalEntryCreated";
-    private static final String POSTINGS_CREATED = "PostingsCreated";
     private static final String INSUFFICIENT_FUNDS = "Insufficient funds";
 
     private final JournalEntryRepository journalEntryRepository;
@@ -43,7 +48,6 @@ class LedgerServiceImpl implements LedgerService {
     private final AccountRepository accountRepository;
     private final JournalEntryMapper journalEntryMapper;
     private final PostingMapper postingMapper;
-    private final OutboxEventService outboxEventService;
 
     // MANDATORY: the entry must commit or roll back together with the domain change that caused it
     @Override
@@ -55,10 +59,16 @@ class LedgerServiceImpl implements LedgerService {
         }
         List<PostingRequest> lines = request.getPostings();
         requireBalanced(lines);
-        Map<Long, Account> accounts = accountRepository.findAllById(
-                        lines.stream().map(PostingRequest::getAccountId).distinct().toList())
-                .stream()
-                .collect(Collectors.toMap(Account::getId, Function.identity()));
+
+        Map<Long, Long> deltas = new HashMap<>();
+        for (PostingRequest line : lines) {
+            long signed = line.getDirection() == PostingDirection.CREDIT ? line.getAmount() : -line.getAmount();
+            deltas.merge(line.getAccountId(), signed, Math::addExact);
+        }
+        // In lock order; nothing below reads a balance before its row is locked
+        Map<Long, Account> accounts = new LinkedHashMap<>();
+        accountRepository.findAllByIdForUpdateInLockOrder(deltas.keySet(), AccountType.SYSTEM)
+                .forEach(account -> accounts.put(account.getId(), account));
         for (PostingRequest line : lines) {
             Account account = accounts.get(line.getAccountId());
             if (account == null) {
@@ -68,6 +78,13 @@ class LedgerServiceImpl implements LedgerService {
                 throw new IllegalArgumentException("Posting currency does not match account " + account.getId());
             }
         }
+        // Only platform accounts may go negative (BANK_CLEARING is, by design). Checked for all accounts before any
+        // balance changes; chk_account_balance_non_negative backs this up in the schema.
+        accounts.values().forEach(account -> {
+            if (account.getType() != AccountType.SYSTEM && account.getBalance() + deltas.get(account.getId()) < 0) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, INSUFFICIENT_FUNDS);
+            }
+        });
 
         JournalEntry entry = new JournalEntry();
         entry.setEntryType(request.getEntryType());
@@ -75,10 +92,10 @@ class LedgerServiceImpl implements LedgerService {
         entry.setReferenceType(request.getReferenceType());
         entry.setReferenceId(request.getReferenceId());
         JournalEntry saved = journalEntryRepository.save(entry);
-        // Header only: the postings follow as their own PostingsCreated event on the same aggregate
-        outboxEventService.record(AGGREGATE_TYPE, saved.getId(), JOURNAL_ENTRY_CREATED, journalEntryMapper.toDto(saved));
 
-        applyToBalances(lines, accounts);
+        // The locked, managed rows are changed directly, so the caller's copies stay current for the rest of the
+        // transaction
+        accounts.values().forEach(account -> account.setBalance(account.getBalance() + deltas.get(account.getId())));
 
         List<Posting> postings = lines.stream().map(line -> {
             Posting posting = new Posting();
@@ -90,33 +107,7 @@ class LedgerServiceImpl implements LedgerService {
             return posting;
         }).toList();
         List<PostingDto> postingDtos = postingMapper.toDtos(postingRepository.saveAll(postings));
-        outboxEventService.record(AGGREGATE_TYPE, saved.getId(), POSTINGS_CREATED, postingDtos);
         return journalEntryMapper.toDto(saved, postingDtos);
-    }
-
-    // One atomic UPDATE per account, which takes the row lock itself, so a busy system account (FEES) makes concurrent
-    // entries wait their turn instead of failing on @Version. A user account that would go negative updates no row:
-    // the whole entry rolls back. chk_account_balance_non_negative backs this up in the schema.
-    //
-    // Lock order: user accounts first, then system accounts, each by id. Transfers and captures have already locked
-    // their user accounts (SELECT ... FOR UPDATE) when they get here, so every writer takes user rows before system
-    // rows. Plain id order would let a deposit hold FEES while waiting for a user row that a transfer holds while
-    // waiting for FEES: a deadlock.
-    private void applyToBalances(List<PostingRequest> lines, Map<Long, Account> accounts) {
-        Map<Long, Long> deltas = new HashMap<>();
-        for (PostingRequest line : lines) {
-            long signed = line.getDirection() == PostingDirection.CREDIT ? line.getAmount() : -line.getAmount();
-            deltas.merge(line.getAccountId(), signed, Math::addExact);
-        }
-        deltas.keySet().stream()
-                .map(accounts::get)
-                .sorted(Comparator.comparing((Account a) -> a.getType() == AccountType.SYSTEM).thenComparing(Account::getId))
-                .forEach(account -> {
-                    long delta = deltas.get(account.getId());
-                    if (delta != 0 && accountRepository.applyBalanceDelta(account.getId(), delta) == 0) {
-                        throw new ResponseStatusException(HttpStatus.CONFLICT, INSUFFICIENT_FUNDS);
-                    }
-                });
     }
 
     private static void requireBalanced(List<PostingRequest> lines) {

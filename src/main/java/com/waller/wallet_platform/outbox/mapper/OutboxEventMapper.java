@@ -2,7 +2,7 @@ package com.waller.wallet_platform.outbox.mapper;
 
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 import org.mapstruct.Named;
 import com.waller.wallet_platform.outbox.dto.OutboxEventDto;
 import com.waller.wallet_platform.outbox.entity.OutboxEvent;

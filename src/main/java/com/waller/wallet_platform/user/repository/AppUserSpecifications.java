@@ -5,7 +5,7 @@ import org.springframework.data.jpa.domain.Specification;
 import com.waller.wallet_platform.user.dto.UserSearchRequest;
 import com.waller.wallet_platform.user.entity.AppUser;
 
-// Filters for GET /user. Blank filters are ignored; LIKE wildcards in the input match literally.
+// Filters for GET /api/users. Blank filters are ignored; LIKE wildcards in the input match literally.
 public final class AppUserSpecifications {
 
     private static final char ESCAPE = '\\';

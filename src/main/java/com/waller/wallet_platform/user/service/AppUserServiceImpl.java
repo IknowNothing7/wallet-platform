@@ -64,10 +64,10 @@ public class AppUserServiceImpl implements AppUserService {
         UserRole previous = user.getRole();
         user.setRole(role);
         // Flushed first so the event carries the new updatedAt
-        AppUserDto dto = userMapper.toDto(userRepository.saveAndFlush(user));
+        AppUser saved = userRepository.saveAndFlush(user);
         log.info("User {} changed from {} to {} by {}", user.getId(), previous, role, ApiUtils.getCurrentUsername());
-        outboxEventService.record(AGGREGATE_TYPE, user.getId(), USER_ROLE_CHANGED, dto);
-        return dto;
+        outboxEventService.record(AGGREGATE_TYPE, user.getId(), USER_ROLE_CHANGED, userMapper.toEvent(saved));
+        return userMapper.toDto(saved);
     }
 
     @Override
@@ -92,11 +92,11 @@ public class AppUserServiceImpl implements AppUserService {
                 .passwordHash(passwordEncoder.encode(password))
                 .role(UserRole.ADMIN)
                 .build();
-        AppUserDto dto = userMapper.toDto(userRepository.saveAndFlush(admin));
-        log.info("Admin {} created by bootstrap", dto.id());
-        // Same event as a registration; the DTO keeps the password hash out of it
-        outboxEventService.record(AGGREGATE_TYPE, dto.id(), USER_CREATED, dto);
-        return dto;
+        AppUser saved = userRepository.saveAndFlush(admin);
+        log.info("Admin {} created by bootstrap", saved.getId());
+        // Same event as a registration; no PII in it (UserEvent)
+        outboxEventService.record(AGGREGATE_TYPE, saved.getId(), USER_CREATED, userMapper.toEvent(saved));
+        return userMapper.toDto(saved);
     }
 
     // Id last, so users with the same name keep their order and pages stay stable between requests

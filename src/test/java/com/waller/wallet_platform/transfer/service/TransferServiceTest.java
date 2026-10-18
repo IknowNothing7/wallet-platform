@@ -81,7 +81,7 @@ class TransferServiceTest {
     @Test
     void createTransfer_repeatedIdempotencyKey_returnsStoredTransferAndBooksNothing() {
         TransferDto previous = TransferDto.builder().id(10L).status(TransferStatus.COMPLETED).build();
-        when(idempotencyService.findResponse("key-1", "POST /transfer/create", request, TransferDto.class))
+        when(idempotencyService.findResponse("key-1", "POST /api/transfers", request, TransferDto.class))
                 .thenReturn(Optional.of(previous));
 
         TransferDto result = transferService.createTransfer(request, "key-1");
@@ -94,7 +94,7 @@ class TransferServiceTest {
     @Test
     void createTransfer_newIdempotencyKey_storesTheResponse() {
         TransferDto dto = TransferDto.builder().id(10L).status(TransferStatus.FAILED).build();
-        when(idempotencyService.findResponse("key-1", "POST /transfer/create", request, TransferDto.class))
+        when(idempotencyService.findResponse("key-1", "POST /api/transfers", request, TransferDto.class))
                 .thenReturn(Optional.empty());
         when(accountAccessChecker.canAccess(1L)).thenReturn(true);
         when(transferProcessingService.book(request)).thenReturn(dto);
@@ -102,7 +102,7 @@ class TransferServiceTest {
         TransferDto result = transferService.createTransfer(request, "key-1");
 
         assertThat(result).isEqualTo(dto);
-        verify(idempotencyService).save("key-1", "POST /transfer/create", request, HttpStatus.CREATED, dto);
+        verify(idempotencyService).save("key-1", "POST /api/transfers", request, HttpStatus.CREATED, dto);
     }
 
     @Test

@@ -76,7 +76,7 @@ public class GlobalExceptionHandler {
         return name != null ? name : "arg" + parameter.getParameterIndex();
     }
 
-    // e.g. /posting/abc where a number is expected
+    // e.g. /api/postings/abc where a number is expected
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<ApiResponse<?>> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
         return build(HttpStatus.BAD_REQUEST, ApiResponse.error("Invalid value for parameter '" + e.getName() + "'"));

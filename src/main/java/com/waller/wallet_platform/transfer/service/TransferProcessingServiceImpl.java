@@ -196,8 +196,9 @@ public class TransferProcessingServiceImpl implements TransferProcessingService 
         TransferLimit limit = transferLimitRepository.findByAccountId(from.getId())
                 .or(() -> transferLimitRepository.findByCurrency(transfer.getCurrency()))
                 .orElse(null);
+        // Fail closed: a currency is enabled for transfers by giving it a transfer_limit row (V5 seeds USD and EUR)
         if (limit == null) {
-            return null;
+            return "Transfers in " + transfer.getCurrency() + " are not enabled";
         }
         if (limit.getPerTransferMax() != null && transfer.getAmount() > limit.getPerTransferMax()) {
             return "Amount exceeds the per-transfer limit";

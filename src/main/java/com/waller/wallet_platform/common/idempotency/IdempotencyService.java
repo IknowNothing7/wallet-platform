@@ -13,11 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import tools.jackson.databind.json.JsonMapper;
 import com.waller.wallet_platform.common.util.ApiUtils;
 import com.waller.wallet_platform.user.entity.AppUser;
 import com.waller.wallet_platform.user.repository.AppUserRepository;
@@ -33,10 +29,8 @@ public class IdempotencyService {
     private static final Duration TTL = Duration.ofHours(24);
     private static final int MAX_KEY_LENGTH = 255;
 
-    private static final ObjectMapper MAPPER = JsonMapper.builder()
-            .addModule(new JavaTimeModule())
-            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
-            .build();
+    // Jackson 3: java.time as ISO-8601 strings by default
+    private static final JsonMapper MAPPER = JsonMapper.builder().build();
 
     private final IdempotenceRepository idempotenceRepository;
     private final AppUserRepository appUserRepository;
@@ -92,7 +86,7 @@ public class IdempotencyService {
         try {
             byte[] json = MAPPER.writeValueAsString(request).getBytes(StandardCharsets.UTF_8);
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(json));
-        } catch (JsonProcessingException | NoSuchAlgorithmException e) {
+        } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("Can not hash request", e);
         }
     }

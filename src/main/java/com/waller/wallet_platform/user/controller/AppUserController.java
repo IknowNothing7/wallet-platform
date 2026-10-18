@@ -23,13 +23,13 @@ import com.waller.wallet_platform.user.service.AppUserService;
 // No sign-up here: users register through /api/auth/register, which also logs them in
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/user")
+@RequestMapping("/api")
 public class AppUserController {
 
     private final AppUserService userService;
 
     // Exposes every user's email, so admins only. Optional filters: username, email, keyword; sortField NAME|EMAIL
-    @GetMapping
+    @GetMapping("/users")
     @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<PageResponse<AppUserDto>> getUsers(
             @Valid @ModelAttribute UserSearchRequest search,
@@ -39,7 +39,7 @@ public class AppUserController {
     }
 
     // How a user becomes a MERCHANT (or goes back to USER). Safe to retry: the same role again changes nothing
-    @PutMapping("/{id}/role")
+    @PutMapping("/users/{id}/role")
     @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<AppUserDto> changeRole(@PathVariable("id") Long id, @Valid @RequestBody UserRoleRequest request) {
         return ApiResponse.ok(userService.changeRole(id, request.getRole()));

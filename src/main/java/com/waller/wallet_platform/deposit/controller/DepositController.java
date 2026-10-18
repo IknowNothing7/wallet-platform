@@ -23,25 +23,25 @@ import com.waller.wallet_platform.deposit.service.DepositService;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/deposit")
+@RequestMapping("/api")
 @Slf4j
 public class DepositController {
 
     private final DepositService depositService;
 
-    @PostMapping("/create")
+    @PostMapping("/deposits")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<DepositDto> createDeposit(@Valid @RequestBody DepositRequest request) {
         log.info("Endpoint {}", ApiUtils.getMethodName());
         return ApiResponse.ok(depositService.createDeposit(request));
     }
 
-    @GetMapping("/{id}")
+    @GetMapping("/deposits/{id}")
     public ApiResponse<DepositDto> getDeposit(@PathVariable("id") Long id) {
         return ApiResponse.ok(depositService.getDeposit(id));
     }
 
-    @GetMapping("/account/{accountId}")
+    @GetMapping("/accounts/{accountId}/deposits")
     public ApiResponse<PageResponse<DepositDto>> getAccountDeposits(
             @PathVariable("accountId") Long accountId,
             @RequestParam(name = "page", defaultValue = "0") @Min(0) int page,

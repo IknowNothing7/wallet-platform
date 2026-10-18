@@ -7,6 +7,7 @@ import com.waller.wallet_platform.common.util.PasswordUtils;
 import com.waller.wallet_platform.common.web.PageResponse;
 import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import com.waller.wallet_platform.user.dto.AppUserDto;
+import com.waller.wallet_platform.user.dto.UserEvent;
 import com.waller.wallet_platform.user.dto.UserSearchRequest;
 import com.waller.wallet_platform.user.dto.UserSortField;
 import com.waller.wallet_platform.user.entity.AppUser;
@@ -90,9 +91,15 @@ public class AppUserServiceTest {
     void bootstrapAdmin_createsAdminWithNormalizedEmailAndHashedPassword() {
         when(repository.findByEmailIgnoreCase("root@email.com")).thenReturn(Optional.empty());
         when(passwordEncoder.encode("Str0ng!Password")).thenReturn("encoded-password-hash");
-        when(repository.saveAndFlush(any(AppUser.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(repository.saveAndFlush(any(AppUser.class))).thenAnswer(inv -> {
+            AppUser saved = inv.getArgument(0);
+            saved.setId(7L);
+            return saved;
+        });
         AppUserDto adminDto = AppUserDto.builder().id(7L).role(UserRole.ADMIN).build();
         when(mapper.toDto(any(AppUser.class))).thenReturn(adminDto);
+        UserEvent adminEvent = new UserEvent(7L, null, null, UserRole.ADMIN);
+        when(mapper.toEvent(any(AppUser.class))).thenReturn(adminEvent);
 
         assertThat(service.bootstrapAdmin("Root", "Root@Email.com", "Str0ng!Password")).isSameAs(adminDto);
 
@@ -101,7 +108,7 @@ public class AppUserServiceTest {
         assertThat(saved.getValue().getEmail()).isEqualTo("root@email.com");
         assertThat(saved.getValue().getPasswordHash()).isEqualTo("encoded-password-hash");
         assertThat(saved.getValue().getRole()).isEqualTo(UserRole.ADMIN);
-        verify(outboxEventService).record("user", 7L, "UserCreated", adminDto);
+        verify(outboxEventService).record("user", 7L, "UserCreated", adminEvent);
     }
 
     @Test
@@ -144,11 +151,13 @@ public class AppUserServiceTest {
         when(repository.findById(1L)).thenReturn(Optional.of(testUser));
         when(repository.saveAndFlush(testUser)).thenReturn(testUser);
         when(mapper.toDto(testUser)).thenReturn(testUserDto);
+        UserEvent event = new UserEvent(1L, null, null, UserRole.MERCHANT);
+        when(mapper.toEvent(testUser)).thenReturn(event);
 
         assertThat(service.changeRole(1L, UserRole.MERCHANT)).isSameAs(testUserDto);
 
         assertThat(testUser.getRole()).isEqualTo(UserRole.MERCHANT);
-        verify(outboxEventService).record("user", 1L, "UserRoleChanged", testUserDto);
+        verify(outboxEventService).record("user", 1L, "UserRoleChanged", event);
     }
 
     @Test

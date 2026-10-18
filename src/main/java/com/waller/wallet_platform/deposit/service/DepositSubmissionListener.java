@@ -1,16 +1,18 @@
 package com.waller.wallet_platform.deposit.service;
 
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
+import com.waller.wallet_platform.config.AsyncConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Sends a new deposit to the bank once createDeposit has committed, so the bank call holds no transaction
- * and the webhook can't arrive before the deposit row is visible.
+ * Sends a new deposit to the bank once createDeposit has committed, so the bank call holds no transaction and the
+ * webhook can't arrive before the deposit row is visible. Asynchronous: POST /api/deposits returns as soon as the
+ * deposit is stored, without waiting for the bank (up to bank.request-timeout, more under bank-sim's latency
+ * scenario). The client learns the result from GET /api/deposits/{id} or the DepositSucceeded/Failed events.
  */
 @Component
 @Slf4j
@@ -19,9 +21,9 @@ public class DepositSubmissionListener {
 
     private final DepositProcessingService depositProcessingService;
 
-    // NOT_SUPPORTED detaches the finished transaction, so submitToBank's own short transactions really commit
+    // On its own thread, so no transaction is attached and submitToBank's own short transactions really commit
+    @Async(AsyncConfig.BANK_SUBMISSION_EXECUTOR)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void onDepositCreated(DepositCreatedEvent event) {
         try {
             depositProcessingService.submitToBank(event.depositId());

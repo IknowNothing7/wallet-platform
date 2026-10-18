@@ -3,6 +3,7 @@ package com.waller.wallet_platform.account.service;
 import java.util.List;
 
 import com.waller.wallet_platform.outbox.service.OutboxEventService;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,13 +43,27 @@ public class AccountServiceImpl implements AccountService {
         AppUser user = userRepository.findByEmailIgnoreCase(ApiUtils.getCurrentUsername())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
 
+        // One account per currency (uq_account_user_currency)
+        if (accountRepository.existsByUserIdAndCurrency(user.getId(), request.getCurrency())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, accountExists(request.getCurrency()));
+        }
         Account account = accountMapper.createAnAccount(request);
         account.setUser(user);
-        Account saved = accountRepository.save(account);
+        Account saved;
+        try {
+            saved = accountRepository.saveAndFlush(account);
+        } catch (DataIntegrityViolationException e) {
+            // A concurrent request for the same currency won the race past the exists check
+            throw new ResponseStatusException(HttpStatus.CONFLICT, accountExists(request.getCurrency()));
+        }
         log.info("Account {} created for user {}", saved.getId(), user.getId());
 
         outboxEventService.record(AGGREGATE_TYPE,account.getId(),ACCOUNT_CREATED,accountMapper.toAccountDto(saved));
         return accountMapper.toAccountDto(saved);
+    }
+
+    private static String accountExists(String currency) {
+        return "You already have a " + currency + " account";
     }
 
     @Override

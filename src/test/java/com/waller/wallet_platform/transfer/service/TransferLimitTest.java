@@ -86,8 +86,12 @@ class TransferLimitTest extends IntegrationTest {
     }
 
     @Test
-    void noLimitRow_allowsTransfer() {
-        assertThat(process(10_000).status()).isEqualTo(TransferStatus.COMPLETED);
+    // Fail closed: without a limit row the currency is not enabled for transfers at all
+    void noLimitRow_refusesTransfer() {
+        TransferDto result = process(100);
+
+        assertThat(result.status()).isEqualTo(TransferStatus.FAILED);
+        assertThat(result.failureReason()).isEqualTo("Transfers in USD are not enabled");
     }
 
     private TransferDto process(long amount) {

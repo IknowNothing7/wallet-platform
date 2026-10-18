@@ -50,7 +50,7 @@ class JwtAuthenticationFilterTest extends IntegrationTest {
         given()
                 .auth().oauth2(jwtTokenProvider.generateToken(appUser))
         .when()
-                .get("/account")
+                .get("/api/accounts")
         .then()
                 .statusCode(200)
                 .body("success", equalTo(true));
@@ -75,7 +75,7 @@ class JwtAuthenticationFilterTest extends IntegrationTest {
         given()
                 .auth().oauth2(expired)
         .when()
-                .get("/account")
+                .get("/api/accounts")
         .then()
                 .statusCode(401)
                 .body("success", equalTo(false));
@@ -90,7 +90,7 @@ class JwtAuthenticationFilterTest extends IntegrationTest {
         given()
                 .auth().oauth2(token)
         .when()
-                .get("/account")
+                .get("/api/accounts")
         .then()
                 .statusCode(401)
                 .body("success", equalTo(false));

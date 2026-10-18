@@ -76,7 +76,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(transferBody(aliceUsd.getId(), bobUsd.getId(), 250, "USD"))
         .when()
-                .post("/transfer/create")
+                .post("/api/transfers")
         .then()
                 .statusCode(201)
                 .body("success", equalTo(true))
@@ -112,7 +112,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(transferBody(aliceUsd.getId(), bobUsd.getId(), 1_001, "USD"))
         .when()
-                .post("/transfer/create")
+                .post("/api/transfers")
         .then()
                 .statusCode(201)
                 .body("payload.status", equalTo("FAILED"))
@@ -131,7 +131,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(transferBody(aliceUsd.getId(), bobUsd.getId(), 100, "USD"))
         .when()
-                .post("/transfer/create")
+                .post("/api/transfers")
         .then()
                 .statusCode(404);
 
@@ -148,7 +148,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(transferBody(aliceUsd.getId(), bobEur.getId(), 250, "USD"))
         .when()
-                .post("/transfer/create")
+                .post("/api/transfers")
         .then()
                 .statusCode(400)
                 .body("success", equalTo(false));
@@ -164,7 +164,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(transferBody(aliceUsd.getId(), bobUsd.getId(), -5, "usd"))
         .when()
-                .post("/transfer/create")
+                .post("/api/transfers")
         .then()
                 .statusCode(400)
                 .body("payload", hasKey("amount"))
@@ -179,7 +179,7 @@ class TransferControllerTest extends IntegrationTest {
         given()
                 .auth().oauth2(jwtTokenProvider.generateToken(bob))
         .when()
-                .get("/transfer/{id}", saved.getId())
+                .get("/api/transfers/{id}", saved.getId())
         .then()
                 .statusCode(200)
                 .body("payload.id", equalTo(saved.getId().intValue()));
@@ -187,7 +187,7 @@ class TransferControllerTest extends IntegrationTest {
         given()
                 .auth().oauth2(jwtTokenProvider.generateToken(stranger))
         .when()
-                .get("/transfer/{id}", saved.getId())
+                .get("/api/transfers/{id}", saved.getId())
         .then()
                 .statusCode(404)
                 .body("message", equalTo("Transfer not found"));
@@ -205,7 +205,7 @@ class TransferControllerTest extends IntegrationTest {
         given()
                 .auth().oauth2(jwtTokenProvider.generateToken(alice))
         .when()
-                .get("/transfer/account/{accountId}", aliceUsd.getId())
+                .get("/api/accounts/{accountId}/transfers", aliceUsd.getId())
         .then()
                 .statusCode(200)
                 .body("payload.content.amount", contains(30, 100))
@@ -216,7 +216,7 @@ class TransferControllerTest extends IntegrationTest {
     void anonymousIsUnauthorized() {
         given()
         .when()
-                .get("/transfer/account/{accountId}", aliceUsd.getId())
+                .get("/api/accounts/{accountId}/transfers", aliceUsd.getId())
         .then()
                 .statusCode(401);
     }
@@ -229,7 +229,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(transferBody(unknownId, bobUsd.getId(), 250, "USD"))
         .when()
-                .post("/transfer/create")
+                .post("/api/transfers")
         .then()
                 .statusCode(404)
                 .body("message", equalTo("Account " + unknownId + " not found"));
@@ -242,7 +242,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(transferBody(bobUsd.getId(), aliceUsd.getId(), 250, "USD"))
         .when()
-                .post("/transfer/create")
+                .post("/api/transfers")
         .then()
                 .statusCode(404)
                 .body("message", equalTo("Account " + bobUsd.getId() + " not found"));
@@ -259,7 +259,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(transferBody(aliceUsd.getId(), unknownId, 250, "USD"))
         .when()
-                .post("/transfer/create")
+                .post("/api/transfers")
         .then()
                 .statusCode(404)
                 .body("message", equalTo("Account " + unknownId + " not found"));
@@ -272,7 +272,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(transferBody(aliceUsd.getId(), aliceUsd.getId(), 250, "USD"))
         .when()
-                .post("/transfer/create")
+                .post("/api/transfers")
         .then()
                 .statusCode(400)
                 .body("message", equalTo("You can not transfer to the same account"));
@@ -288,7 +288,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(transferBody(aliceUsd.getId(), bobUsd.getId(), 250, "EUR"))
         .when()
-                .post("/transfer/create")
+                .post("/api/transfers")
         .then()
                 .statusCode(400)
                 .body("success", equalTo(false));
@@ -329,7 +329,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(Map.of("reason", "fraud"))
         .when()
-                .post("/transfer/{id}/reverse", id)
+                .post("/api/transfers/{id}/reverse", id)
         .then()
                 .statusCode(202)
                 .body("payload.status", equalTo("REVERSED"));
@@ -347,7 +347,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(Map.of("reason", "fraud"))
         .when()
-                .post("/transfer/{id}/reverse", id)
+                .post("/api/transfers/{id}/reverse", id)
         .then()
                 .statusCode(403);
 
@@ -368,7 +368,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(Map.of("reason", "fraud"))
         .when()
-                .post("/transfer/{id}/reverse", id)
+                .post("/api/transfers/{id}/reverse", id)
         .then()
                 .statusCode(409)
                 .body("message", equalTo("Destination account no longer has the funds to reverse this transfer"));
@@ -387,7 +387,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(Map.of("reason", "fraud"))
         .when()
-                .post("/transfer/{id}/reverse", failed)
+                .post("/api/transfers/{id}/reverse", failed)
         .then()
                 .statusCode(409)
                 .body("message", equalTo("Transfer is FAILED and can not be reversed"));
@@ -403,7 +403,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(Map.of("reason", " "))
         .when()
-                .post("/transfer/{id}/reverse", id)
+                .post("/api/transfers/{id}/reverse", id)
         .then()
                 .statusCode(400)
                 .body("payload", hasKey("reason"));
@@ -425,7 +425,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(transferBody(aliceUsd.getId(), bobUsd.getId(), amount, "USD"))
         .when()
-                .post("/transfer/create")
+                .post("/api/transfers")
         .then();
     }
 

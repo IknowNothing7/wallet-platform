@@ -9,6 +9,10 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate
+    properties:
+      # jsonb columns (outbox payload, idempotency response) hold Jackson 3 JsonNodes. Jackson 2 is still on the
+      # classpath (swagger-core, jjwt-jackson), so Hibernate is told which one to use rather than left to guess.
+      hibernate.type.json_format_mapper: org.hibernate.type.format.jackson.Jackson3JsonFormatMapper
 
   kafka:
     # Overridden automatically by Docker Compose support in development
@@ -67,6 +71,9 @@ bank:
       window: PT1M
 
 deposit:
+  submission:
+    threads: 4            # concurrent bank calls for new deposits (DepositSubmissionListener)
+    queue-capacity: 200   # beyond this, new deposits wait for reconciliation instead
   pending-ttl: PT30M      # PENDING this long: ask the bank once more, then expire
   reconciliation:
     poll-interval: PT30S

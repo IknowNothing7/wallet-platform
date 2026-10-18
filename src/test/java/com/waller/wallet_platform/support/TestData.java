@@ -2,7 +2,7 @@ package com.waller.wallet_platform.support;
 
 import java.time.Instant;
 
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.JsonNodeFactory;
 import com.waller.wallet_platform.account.entity.Account;
 import com.waller.wallet_platform.deposit.entity.Deposit;
 import com.waller.wallet_platform.deposit.entity.DepositStatus;
