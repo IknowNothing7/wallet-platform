@@ -24,7 +24,6 @@ import com.waller.wallet_platform.hold.entity.Hold;
 import com.waller.wallet_platform.hold.entity.HoldStatus;
 import com.waller.wallet_platform.hold.mapper.HoldMapper;
 import com.waller.wallet_platform.hold.repository.HoldRepository;
-import com.waller.wallet_platform.hold.service.HoldServiceImpl;
 import com.waller.wallet_platform.ledger.dto.JournalEntryDto;
 import com.waller.wallet_platform.ledger.dto.JournalEntryRequest;
 import com.waller.wallet_platform.ledger.dto.PostingRequest;
