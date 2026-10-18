@@ -1,11 +1,13 @@
 package com.waller.wallet_platform.deposit.service;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.server.ResponseStatusException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -43,6 +45,8 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
     private static final String DEPOSIT_FAILED = "DepositFailed";
     private static final String DEPOSIT_EXPIRED = "DepositExpired";
     private static final String IDEMPOTENCY_PREFIX = "deposit-";
+    // 2%, rounded down in the user's favour
+    private static final long FEE_BASIS_POINTS = 200;
 
     private final DepositRepository depositRepository;
     private final DepositMapper depositMapper;
@@ -52,6 +56,7 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
     private final JournalEntryRepository journalEntryRepository;
     private final OutboxEventService outboxEventService;
     private final TransactionTemplate transactionTemplate;
+    private final DepositAlerts depositAlerts;
 
     // Deliberately not @Transactional: the bank call happens between two short transactions
     @Override
@@ -61,14 +66,6 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
         if (deposit.getStatus() != DepositStatus.PENDING) {
             return depositMapper.toDto(deposit);
         }
-
-        // TODO: Wire this in. createDeposit still takes gatewayReference from the client, but with bank-sim the
-        //  reference only exists after POST /payments. Options: make gateway_reference nullable (migration V4,
-        //  the unique constraint still works since NULLs don't collide), or keep the client-supplied value as
-        //  our own reference and store bank-sim's in a new column. Then call submitToBank after createDeposit
-        //  commits (directly, or from a DepositCreated consumer / outbox-style job so a crash in between is retried).
-        // TODO: Set deposit.expiresAt on creation (config: deposit.pending-ttl) so expire() has something to check
-        // TODO: Check the account is ACTIVE before sending money in (see the TODO in DepositServiceTest)
         BankPayment payment = bankClient.createPayment(
                 IDEMPOTENCY_PREFIX + deposit.getId(),
                 new BankPaymentRequest(deposit.getAmount(), deposit.getCurrency(), String.valueOf(deposit.getId())));
@@ -93,23 +90,26 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
         // Locked so a webhook, its duplicate and a reconciliation run can't settle the same deposit twice
         Deposit deposit = depositRepository.findByIdForUpdate(depositId).orElse(null);
         if (deposit == null) {
-            // 2xx anyway: a retry would hit the same missing row. TODO: alert; this means money with no deposit.
-            log.error("Bank result {} for unknown deposit {}", result.reference(), depositId);
+            // 2xx anyway: a retry would hit the same missing row. This means money with no deposit.
+            depositAlerts.raise(DepositAlerts.Reason.UNKNOWN_DEPOSIT,
+                    "Bank result {} for unknown deposit {}", result.reference(), depositId);
             return;
         }
 
         if (!matches(deposit, result)) {
-            // TODO: Alert / park for manual review. Never credit an amount the user didn't ask for.
-            log.error("Bank result {} does not match deposit {} (amount/currency/reference)",
+            // Left untouched for manual review. Never credit an amount the user didn't ask for.
+            depositAlerts.raise(DepositAlerts.Reason.RESULT_MISMATCH,
+                    "Bank result {} does not match deposit {} (amount/currency/reference)",
                     result.reference(), deposit.getId());
             return;
         }
 
         if (deposit.getStatus() != DepositStatus.PENDING) {
             if (deposit.getStatus() != toDepositStatus(result.status())) {
-                // e.g. EXPIRED locally but the bank says SUCCEEDED: the money did arrive
-                // TODO: Decide: credit anyway (late success) or refund through the bank; at least alert
-                log.error("Deposit {} is {} but the bank now reports {}",
+                // e.g. EXPIRED locally but the bank says SUCCEEDED: the money did arrive.
+                // Status and ledger are left as they are; someone has to credit or refund by hand.
+                depositAlerts.raise(DepositAlerts.Reason.STATUS_CONFLICT,
+                        "Deposit {} is {} but the bank now reports {}",
                         deposit.getId(), deposit.getStatus(), result.status());
             }
             // Otherwise a duplicate delivery (bank-sim's DUPLICATE scenario); nothing to do
@@ -124,39 +124,61 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
         }
     }
 
+    // Deliberately not @Transactional: the bank is asked first, outside any transaction
     @Override
-    @Transactional
     public void expire(Long depositId) {
-        Deposit deposit = lockDeposit(depositId);
-        if (deposit.getStatus() != DepositStatus.PENDING
-                || deposit.getExpiresAt() == null
-                || deposit.getExpiresAt().isAfter(Instant.now())) {
+        Deposit deposit = depositRepository.findById(depositId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, DEPOSIT_NOT_FOUND));
+        if (!isExpirable(deposit)) {
             return;
         }
-        // TODO: Ask the bank first (getPayment) so a payment that did succeed isn't expired; or cancel it at the bank
-        deposit.setStatus(DepositStatus.EXPIRED);
-        transitioned(deposit, DEPOSIT_EXPIRED);
+
+        // Ask the bank first so a payment that did settle isn't expired
+        BankPayment payment = findBankPayment(deposit);
+        if (payment != null && payment.status() != BankPaymentStatus.PENDING) {
+            // Self-invocation skips the proxy, so applyResult needs its own transaction here
+            transactionTemplate.executeWithoutResult(status -> applyResult(toResult(payment)));
+            return;
+        }
+
+        // TODO: Cancel the payment at the bank once bank-sim supports it; a late success now raises STATUS_CONFLICT
+        transactionTemplate.executeWithoutResult(status -> {
+            Deposit locked = lockDeposit(depositId);
+            // Re-checked under the lock: a webhook may have settled it while we were asking the bank
+            if (!isExpirable(locked)) {
+                return;
+            }
+            locked.setStatus(DepositStatus.EXPIRED);
+            transitioned(locked, DEPOSIT_EXPIRED);
+        });
     }
 
-    // The bank holds the money now, so the platform owes it to the user: bank clearing -> user account
+    // The bank holds the money now, so the platform owes it to the user minus the fee:
+    // bank clearing -> user account + fees
     private void succeed(Deposit deposit) {
         Account account = deposit.getAccount();
         Account clearing = systemAccountService.get(SystemAccountKind.BANK_CLEARING, deposit.getCurrency());
+        long fee = deposit.getAmount() * FEE_BASIS_POINTS / 10_000;
+
+        List<PostingRequest> postings = new ArrayList<>();
+        postings.add(new PostingRequest(clearing.getId(), PostingDirection.DEBIT, deposit.getAmount(), deposit.getCurrency()));
+        postings.add(new PostingRequest(account.getId(), PostingDirection.CREDIT, deposit.getAmount() - fee, deposit.getCurrency()));
+        // Postings must be positive, so small deposits whose fee rounds to 0 get no fee posting
+        if (fee > 0) {
+            Account fees = systemAccountService.get(SystemAccountKind.FEES, deposit.getCurrency());
+            postings.add(new PostingRequest(fees.getId(), PostingDirection.CREDIT, fee, deposit.getCurrency()));
+        }
         JournalEntryDto entry = journalEntryService.createJournalEntry(new JournalEntryRequest(
                 JournalEntryType.DEPOSIT,
                 "Deposit " + deposit.getId() + " via " + deposit.getGateway(),
                 AGGREGATE_TYPE,
                 deposit.getId(),
-                List.of(
-                        new PostingRequest(clearing.getId(), PostingDirection.DEBIT, deposit.getAmount(), deposit.getCurrency()),
-                        new PostingRequest(account.getId(), PostingDirection.CREDIT, deposit.getAmount(), deposit.getCurrency()))));
-        // TODO: Balances only change once PostingServiceImpl applies postings (its own TODO)
-        // TODO: Fees: a FEE posting to SystemAccountKind.FEES, credited amount = amount - fee
+                postings));
 
         deposit.setStatus(DepositStatus.SUCCEEDED);
         deposit.setJournalEntry(journalEntryRepository.getReferenceById(entry.id()));
         transitioned(deposit, DEPOSIT_SUCCEEDED);
-        log.info("Deposit {} succeeded, entry {}", deposit.getId(), entry.id());
+        log.info("Deposit {} succeeded, fee {}, entry {}", deposit.getId(), fee, entry.id());
     }
 
     private void fail(Deposit deposit, String reason) {
@@ -166,9 +188,40 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
         log.info("Deposit {} failed: {}", deposit.getId(), reason);
     }
 
-    // TODO: Once gateway_reference is set by submitToBank, also require it to equal result.reference()
+    // A null reference is allowed: the webhook can arrive before submitToBank has stored it
     private static boolean matches(Deposit deposit, BankPaymentResult result) {
-        return deposit.getAmount() == result.amount() && deposit.getCurrency().equals(result.currency());
+        return deposit.getAmount() == result.amount()
+                && deposit.getCurrency().equals(result.currency())
+                && (deposit.getGatewayReference() == null || deposit.getGatewayReference().equals(result.reference()));
+    }
+
+    private static boolean isExpirable(Deposit deposit) {
+        return deposit.getStatus() == DepositStatus.PENDING
+                && deposit.getExpiresAt() != null
+                && !deposit.getExpiresAt().isAfter(Instant.now());
+    }
+
+    // Null when the bank has no payment for this deposit: never submitted, or it failed before storing it
+    private BankPayment findBankPayment(Deposit deposit) {
+        if (deposit.getGatewayReference() == null) {
+            return null;
+        }
+        try {
+            return bankClient.getPayment(deposit.getGatewayReference());
+        } catch (HttpClientErrorException.NotFound e) {
+            return null;
+        }
+    }
+
+    private static BankPaymentResult toResult(BankPayment payment) {
+        return new BankPaymentResult(
+                payment.reference(),
+                payment.walletDepositId(),
+                payment.status(),
+                payment.amount(),
+                payment.currency(),
+                payment.failureReason(),
+                Instant.now());
     }
 
     private static DepositStatus toDepositStatus(BankPaymentStatus status) {

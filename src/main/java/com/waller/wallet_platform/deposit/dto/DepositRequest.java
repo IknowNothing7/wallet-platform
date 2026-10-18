@@ -34,7 +34,6 @@ public class DepositRequest implements Serializable {
     @Size(max = 50)
     private String gateway;
 
-    @NotBlank(message = "gatewayReference can not be empty")
     @Size(max = 255)
     private String gatewayReference;
 

@@ -7,11 +7,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.data.domain.Pageable;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import com.waller.wallet_platform.account.entity.Account;
 import com.waller.wallet_platform.account.entity.AccountStatus;
@@ -35,8 +37,11 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -60,6 +65,9 @@ public class DepositServiceTest {
 
     @Mock
     private OutboxEventService outboxEventService;
+
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks
     private DepositServiceImpl depositService;
@@ -100,6 +108,8 @@ public class DepositServiceTest {
         deposit.setAccount(account);
         deposit.setAmount(request.getAmount());
         deposit.setCurrency(request.getCurrency());
+
+        ReflectionTestUtils.setField(depositService, "pendingTtl", Duration.ofMinutes(30));
     }
 
     @Test
@@ -108,7 +118,10 @@ public class DepositServiceTest {
         when(mapper.requestToEntity(request)).thenReturn(deposit);
         when(mapper.toDto(deposit)).thenReturn(depositDto);
         when(repository.save(deposit)).thenReturn(deposit);
+        Instant before = Instant.now();
         DepositDto  result = depositService.createDeposit(request);
+
+        assertThat(deposit.getExpiresAt()).isBetween(before.plus(Duration.ofMinutes(30)), Instant.now().plus(Duration.ofMinutes(30)));
 
         assertNotNull(result);
 
@@ -123,6 +136,7 @@ public class DepositServiceTest {
         verify(mapper,times(1)).requestToEntity(request);
         verify(repository,times(1)).save(deposit);
         verify(outboxEventService).record("deposit", deposit.getId(), "DepositCreated", depositDto);
+        verify(eventPublisher).publishEvent(new DepositCreatedEvent(deposit.getId()));
     }
 
     @Test

@@ -1,0 +1,21 @@
+groups:
+  - name: wallet-deposits
+    rules:
+      # Raised from code via DepositAlerts.raise(...): any new alert in the last 5 minutes fires this
+      - alert: DepositAlert
+        expr: increase(wallet_deposit_alerts_total[5m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Deposit needs manual review: {{ $labels.reason }}"
+          description: >-
+            {{ $value | humanize }} deposit alert(s) with reason {{ $labels.reason }} in the last 5 minutes.
+            Search the wallet-platform logs for "ALERT [{{ $labels.reason }}]" for deposit ids and bank references.
+
+      - alert: WalletPlatformDown
+        expr: up{job="wallet-platform"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus cannot scrape wallet-platform"

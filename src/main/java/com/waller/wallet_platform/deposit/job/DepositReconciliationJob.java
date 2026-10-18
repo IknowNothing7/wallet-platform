@@ -66,8 +66,12 @@ public class DepositReconciliationJob {
             depositProcessingService.expire(deposit.getId());
             return;
         }
-        // TODO: A deposit whose submitToBank never got a response has no bank reference yet: resubmit it
-        //  (same idempotency key, so no double charge) instead of looking it up
+        // submitToBank never got a response (or never ran): resubmit, the same idempotency key means no double charge
+        if (deposit.getGatewayReference() == null) {
+            depositProcessingService.submitToBank(deposit.getId());
+            log.info("Resubmitted deposit {} to the bank", deposit.getId());
+            return;
+        }
         BankPayment payment = bankClient.getPayment(deposit.getGatewayReference());
         if (payment.status() == BankPaymentStatus.PENDING) {
             return;

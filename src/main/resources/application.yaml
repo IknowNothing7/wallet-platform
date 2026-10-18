@@ -61,6 +61,7 @@ bank:
     tolerance: PT5M       # max age of X-Bank-Timestamp, against replays
 
 deposit:
+  pending-ttl: PT30M      # PENDING this long: ask the bank once more, then expire
   reconciliation:
     poll-interval: PT30S
     stale-after: PT1M     # PENDING this long without a webhook: ask the bank
@@ -71,6 +72,15 @@ transfer:
     poll-interval: PT5S
     pending-for: PT10S    # only pick up transfers this old, so a synchronous process() call isn't raced
     batch-size: 100
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus   # all three are permitAll in SecurityConfig
+  metrics:
+    tags:
+      application: ${spring.application.name}   # lets Grafana tell wallet-platform apart from bank-sim etc.
 
 logging:
   level:
