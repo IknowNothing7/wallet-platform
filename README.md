@@ -37,4 +37,3 @@ Docker must be running, because the integration tests use Testcontainers.
 ## More
 
 - Event schemas: [contracts/](contracts/README.md)
-- Open work: [docs/TODO.md](docs/TODO.md)
