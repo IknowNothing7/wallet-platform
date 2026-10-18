@@ -1,11 +1,50 @@
 # TODOs
 
-All `TODO` comments in the codebase, collected on 2026-10-15 (78 total). Paths are relative to the repo root;
-`wallet-service` code lives under `src/main/java/com/waller/wallet_platform/` and its tests under
-`src/test/java/com/waller/wallet_platform/`.
+All `TODO` comments in the codebase, collected on 2026-10-15 (78 total) and updated on 2026-10-17. Paths are relative
+to the repo root; `wallet-service` code lives under `src/main/java/com/waller/wallet_platform/` and its tests under
+`src/test/java/com/waller/wallet_platform/`. Line numbers are from the first collection and may have drifted.
 
-The most important one is applying postings to account balances (`ledger/service/PostingServiceImpl.java:67`); several
-deposit and transfer TODOs depend on it.
+## Road to done
+
+"Done" here means: the three money flows (deposit, transfer, hold) work end to end, the whole system starts with one
+command, and the README explains it. The sections below this one list every TODO; this one picks the order.
+
+### Must do
+
+1. **Deposits never reach the bank.** `DepositProcessingServiceImpl.submitToBank` exists but nothing calls it, so a
+   deposit stays PENDING and bank-sim never sees it. Make `gateway_reference` nullable (migration V4) or store
+   bank-sim's reference in a new column, call `submitToBank` after `createDeposit` commits, and set `expiresAt` on
+   creation. The webhook and reconciliation code behind it is already written. See the Deposits items `:65`, `:70`
+   and `:169`.
+2. **One-command startup.** `compose.yaml` only starts Postgres and Kafka. Add Dockerfiles for wallet-service,
+   bank-sim and notification-service, and compose entries that wire them together: bank URL and the shared webhook
+   secret (`BANK_SIM_WEBHOOK_SECRET`) between wallet-service and bank-sim, Kafka and Postgres for
+   notification-service.
+3. **Check notification-service's dead-letter publishing** (`KafkaConsumerConfig.java:17`). If the DLT publisher can't
+   send, one malformed record is retried forever instead of being parked. Prove it with a test that sends a record
+   without an `event-id` header and expects it on `<topic>.DLT`.
+4. **README.** It is one line, and `HELP.md` is the Spring Initializr default (delete it). Cover what the system does,
+   the architecture (wallet-service → outbox → Kafka → notification-service; bank-sim → signed webhook →
+   wallet-service), how to run it, and how to use the bank-sim scenarios (`/control`) to demonstrate failures.
+
+### Should do
+
+- Idempotency-Key on `POST /transfer/create` (Transfers `:55`).
+- Bank error handling in `BankClient`: retry, 4xx vs 5xx, 404 (Bank integration `:39`, `:41`, `:54`). Only matters
+  once deposits are submitted.
+- Decide whether deposits into a FROZEN account are allowed (Deposits `:71`).
+- Admin endpoint for transfer reversal, and lock both accounts in id order there so it can't deadlock with
+  `process()` (Transfers `:96`, `:109`).
+- Event schemas for `DepositSucceeded|DepositFailed|DepositExpired` and `TransferCompleted|TransferFailed|TransferReversed`
+  (Deposits `:41`, Transfers `:38`), plus notification templates for deposit results (Other services).
+- One shared Postgres container for the `@SpringBootTest` classes (Tests, Shared setup `:10`); the suite gets slower
+  with every controller test.
+
+### Can wait (list as known limitations in the README)
+
+Multi-instance job claiming (ShedLock / SKIP LOCKED), metrics and alerts, fees, transfer limits and fraud checks,
+partial reversals, webhook secret rotation, push notifications, rate limiting the webhook endpoint, and the test
+cleanup items below.
 
 ## wallet-service — main code
 
@@ -39,8 +78,8 @@ deposit and transfer TODOs depend on it.
   the bank; at least alert.
 - [ ] `deposit/service/DepositProcessingServiceImpl.java:136` — Ask the bank first (`getPayment`) so a payment that did
   succeed isn't expired; or cancel it at the bank.
-- [ ] `deposit/service/DepositProcessingServiceImpl.java:153` — Balances only change once `PostingServiceImpl` applies
-  postings.
+- [x] `deposit/service/DepositProcessingServiceImpl.java:153` — Balances only change once `PostingServiceImpl` applies
+  postings. Done: postings now move balances. Remove the comment.
 - [ ] `deposit/service/DepositProcessingServiceImpl.java:154` — Fees: a FEE posting to `SystemAccountKind.FEES`,
   credited amount = amount - fee.
 - [ ] `deposit/service/DepositProcessingServiceImpl.java:169` — Once `gateway_reference` is set by `submitToBank`, also
@@ -48,7 +87,9 @@ deposit and transfer TODOs depend on it.
 
 ### Ledger
 
-- [ ] `ledger/service/PostingServiceImpl.java:67` — **Apply postings to account balances.**
+- [x] `ledger/service/PostingServiceImpl.java:67` — **Apply postings to account balances.** Done: a CREDIT adds the
+  amount, a DEBIT subtracts it. There is no `balance >= 0` constraint, so the bank clearing account going negative on
+  deposits is expected.
 
 ### Transfers
 
@@ -60,14 +101,16 @@ deposit and transfer TODOs depend on it.
 - [ ] `transfer/job/TransferProcessingJob.java:55` — Metrics: count of PENDING transfers and oldest age, for an alert.
 - [ ] `transfer/service/TransferProcessingServiceImpl.java:38` — Add
   `contracts/events/TransferCompleted|TransferFailed|TransferReversed.v1.schema.json` and the README rows.
-- [ ] `transfer/service/TransferProcessingServiceImpl.java:52` — Wire this in. Either call it from `createTransfer` in
+- [x] `transfer/service/TransferProcessingServiceImpl.java:52` — Effectively done: `TransferProcessingJob` processes
+  PENDING transfers every `transfer.processing.poll-interval` (asynchronous). Remove the comment, or switch to
+  synchronous processing if the response should already say COMPLETED/FAILED. Original note: Wire this in. Either call it from `createTransfer` in
   the same transaction (synchronous: the response already says COMPLETED/FAILED), or leave `createTransfer` as is and
   let `TransferProcessingJob` pick it up (asynchronous: the client polls `GET /transfer/{id}`). Synchronous is simpler;
   async allows limits/fraud checks.
 - [ ] `transfer/service/TransferProcessingServiceImpl.java:55` — Idempotency-Key on `POST /transfer/create`
   (`common/idempotency` exists), so a retried request doesn't create and book a second transfer.
-- [ ] `transfer/service/TransferProcessingServiceImpl.java:86` — Balances only change once `PostingServiceImpl` applies
-  postings; until then the funds check reads a balance that never moves.
+- [x] `transfer/service/TransferProcessingServiceImpl.java:86` — Balances only change once `PostingServiceImpl` applies
+  postings; until then the funds check reads a balance that never moves. Done; remove the comment.
 - [ ] `transfer/service/TransferProcessingServiceImpl.java:88` — Fees: a FEE posting from the sender to
   `SystemAccountKind.FEES`.
 - [ ] `transfer/service/TransferProcessingServiceImpl.java:96` — Expose as an admin-only endpoint
@@ -179,30 +222,31 @@ deposit and transfer TODOs depend on it.
 
 ### Ledger
 
-- [ ] `ledger/service/PostingServiceTest.java:109` — Missing cases from `createPostings`:
+- [x] `ledger/service/PostingServiceTest.java:109` — Missing cases from `createPostings`:
   - an unknown journal entry gives 404 and nothing is saved
   - an unknown account gives "Account X not found"
   - a posting whose currency differs from its account gives 400
   - fewer than two postings gives "At least two postings are required"
   - balancing is per currency: a USD debit against an EUR credit of the same amount gives 400
   - `getPosting` for someone else's posting gives 404
-- [ ] `ledger/service/PostingServiceTest.java:116` — Once `PostingServiceImpl` applies postings to balances, add tests
+- [x] `ledger/service/PostingServiceTest.java:116` — Done: `PostingServiceTest` checks balances, and
+  `PostingControllerTest` checks them against Postgres. Original note: Once `PostingServiceImpl` applies postings to balances, add tests
   that check the balances, ideally against Postgres.
 
 ### Users
 
 - [ ] `user/controller/UserControllerTest.java:91` — Missing endpoint tests:
-  - `POST /user/create`: 201; the password hash never appears in the response; a duplicate email in different case
+  - [x] `POST /user/create`: 201; the password hash never appears in the response; a duplicate email in different case
     gives 409.
   - `GET /user` paging (page/size) and `@Max(100)` on size give 400 with the parameter name.
   - `UserSearchRequest` / `UserSortField` are never used in main code; either wire them into `GET /user` and test them,
     or delete them.
-- [ ] `user/service/AppUserServiceTest.java:4` — `OutboxEvent` and `AppUserServiceImpl` (same package) are unused
+- [x] `user/service/AppUserServiceTest.java:4` — `OutboxEvent` and `AppUserServiceImpl` (same package) are unused
   imports.
-- [ ] `user/service/AppUserServiceTest.java:88` — These compare the mapper stub with itself. Check what the service
+- [x] `user/service/AppUserServiceTest.java:88` — These compare the mapper stub with itself. Check what the service
   actually does instead: capture the saved user and assert `passwordHash` == encoder output (not the raw password) and
   that the email is normalized. Use a mixed-case email in the request so normalization is really tested.
-- [ ] `user/service/AppUserServiceTest.java:110` — Assert the 409 status, and verify nothing was saved and no event was
+- [x] `user/service/AppUserServiceTest.java:110` — Assert the 409 status, and verify nothing was saved and no event was
   recorded.
 - [ ] `user/service/AppUserServiceTest.java:128` — Missing: the race where `saveAndFlush` throws
   `DataIntegrityViolationException` should give 409 "Email is already registered"; and `getUsers` paging (sorted by id).
@@ -227,16 +271,26 @@ deposit and transfer TODOs depend on it.
 
 ### Transfers
 
-- [ ] `transfer/service/TransferServiceTest.java:127` — Missing: an unknown destination account. Its message currently
+- [x] `transfer/service/TransferServiceTest.java:127` — Missing: an unknown destination account. Its message currently
   names the source id (`TransferServiceImpl.java:292`); fix that first, then assert "Account 2 not found".
-- [ ] `transfer/controller/TransferControllerTest.java:193` — Add these once `createTransfer` is fixed:
+- [x] `transfer/controller/TransferControllerTest.java:193` — Add these once `createTransfer` is fixed:
   - A user who doesn't own `idFromAccount` gets 404. Today the service doesn't check this, so anyone can create a
     transfer from someone else's account.
   - A transfer to the same account gives 400. Today `chk_transfer_distinct` turns it into a 500.
   - `request.currency` that differs from both accounts' currency gives 400.
   - An unknown destination account gives a 404 naming that account; the message currently uses the source id.
 
+### Auth
+
+- [ ] `auth/RefreshTokenServiceTest.java` — The class is empty. Add tests for issuing, rotating and revoking refresh
+  tokens, or delete it.
+
 ## Other services
+
+- [ ] Not yet tested: `NotificationRepository` against Postgres (`markAllRead` touches only that user's unread rows,
+  unread count, newest first), `NotificationController` security (401 without a token, user id taken from the
+  `user_id` claim), and bank-sim's `WebhookSender` (backoff until 2xx, gives up after `maxAttempts`, DROP and
+  DUPLICATE modes, `resend` of a PENDING payment gives 409). notification-service has no Testcontainers dependency yet.
 
 - [ ] `services/bank-sim/src/main/java/com/waller/bank_sim/payment/service/PaymentServiceImpl.java:42` — Reject a
   reused key whose amount/currency differ from the original request (422).

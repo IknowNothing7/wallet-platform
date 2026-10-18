@@ -13,16 +13,20 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import com.waller.wallet_platform.security.JwtTokenProvider;
+import com.waller.wallet_platform.user.dto.AppUserRequest;
 import com.waller.wallet_platform.user.entity.AppUser;
 import com.waller.wallet_platform.user.entity.UserRole;
 import com.waller.wallet_platform.user.repository.AppUserRepository;
 
 import io.restassured.RestAssured;
+import io.restassured.http.ContentType;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.not;
 import static com.waller.wallet_platform.support.TestData.user;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -88,9 +92,47 @@ class UserControllerTest {
                 .statusCode(401);
     }
 
+    @Test
+    void createUserReturnsCreatedWithoutPassword() {
+        AppUserRequest request = AppUserRequest.builder()
+                .name("newUser")
+                .email("newOne@email.com")
+                .password("passsworD!11")
+                .build();
+
+        given()
+                .contentType(ContentType.JSON)
+                .body(request)
+        .when()
+                .post("/user/create")
+        .then()
+                .statusCode(201)
+                .body("success", equalTo(true))
+                .body("payload.name", equalTo("newUser"))
+                .body("payload.email", equalTo("newone@email.com"))
+                .body("payload", not(hasKey("password")))
+                .body("payload", not(hasKey("passwordHash")));
+    }
+
+    @Test
+    void duplicateEmailInDifferentCaseIsConflict() {
+        appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
+        AppUserRequest request = AppUserRequest.builder()
+                .name("Robin")
+                .email("ADMIN@email.com")
+                .password("!Password!11")
+                .build();
+
+        given()
+                .contentType(ContentType.JSON)
+                .body(request)
+        .when()
+                .post("/user/create")
+        .then()
+                .statusCode(409);
+    }
+
     // TODO: Missing endpoint tests:
-    //  - POST /user/create: 201; the password hash never appears in the response; a duplicate email in different
-    //    case gives 409.
     //  - GET /user paging (page/size) and @Max(100) on size give 400 with the parameter name.
     //  - UserSearchRequest / UserSortField are never used in main code; either wire them into GET /user and test
     //    them, or delete them.

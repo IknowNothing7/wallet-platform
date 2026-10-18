@@ -190,12 +190,6 @@ class TransferControllerTest {
                 .body("payload.totalElements", equalTo(2));
     }
 
-    // TODO: Add these once createTransfer is fixed:
-    //  - A user who doesn't own idFromAccount gets 404. Today the service doesn't check this, so anyone can create
-    //    a transfer from someone else's account.
-    //  - A transfer to the same account gives 400. Today chk_transfer_distinct turns it into a 500.
-    //  - request.currency that differs from both accounts' currency gives 400.
-    //  - An unknown destination account gives a 404 naming that account; the message currently uses the source id.
     @Test
     void anonymousIsUnauthorized() {
         given()
@@ -203,6 +197,82 @@ class TransferControllerTest {
                 .get("/transfer/account/{accountId}", aliceUsd.getId())
         .then()
                 .statusCode(401);
+    }
+
+    @Test
+    void createTransfer_unknownSourceAccount_returns404() {
+        long unknownId = 132343213L;
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(alice))
+                .contentType(ContentType.JSON)
+                .body(transferBody(unknownId, bobUsd.getId(), 250, "USD"))
+        .when()
+                .post("/transfer/create")
+        .then()
+                .statusCode(404)
+                .body("message", equalTo("Account " + unknownId + " not found"));
+    }
+
+    @Test
+    void createTransfer_fromSomeoneElsesAccount_returns404AndWritesNothing() {
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(alice))
+                .contentType(ContentType.JSON)
+                .body(transferBody(bobUsd.getId(), aliceUsd.getId(), 250, "USD"))
+        .when()
+                .post("/transfer/create")
+        .then()
+                .statusCode(404)
+                .body("message", equalTo("Account " + bobUsd.getId() + " not found"));
+
+        assertThat(transferRepository.count()).isZero();
+        assertThat(outboxRepository.count()).isZero();
+    }
+
+    @Test
+    void createTransfer_unknownDestinationAccount_returns404NamingThatAccount() {
+        long unknownId = 132343213L;
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(alice))
+                .contentType(ContentType.JSON)
+                .body(transferBody(aliceUsd.getId(), unknownId, 250, "USD"))
+        .when()
+                .post("/transfer/create")
+        .then()
+                .statusCode(404)
+                .body("message", equalTo("Account " + unknownId + " not found"));
+    }
+
+    @Test
+    void createTransfer_toSameAccount_returns400AndWritesNothing() {
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(alice))
+                .contentType(ContentType.JSON)
+                .body(transferBody(aliceUsd.getId(), aliceUsd.getId(), 250, "USD"))
+        .when()
+                .post("/transfer/create")
+        .then()
+                .statusCode(400)
+                .body("message", equalTo("You can not transfer to the same account"));
+
+        assertThat(transferRepository.count()).isZero();
+        assertThat(outboxRepository.count()).isZero();
+    }
+
+    @Test
+    void createTransfer_requestCurrencyDiffersFromAccounts_returns400AndWritesNothing() {
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(alice))
+                .contentType(ContentType.JSON)
+                .body(transferBody(aliceUsd.getId(), bobUsd.getId(), 250, "EUR"))
+        .when()
+                .post("/transfer/create")
+        .then()
+                .statusCode(400)
+                .body("success", equalTo(false));
+
+        assertThat(transferRepository.count()).isZero();
+        assertThat(outboxRepository.count()).isZero();
     }
 
     private static Map<String, Object> transferBody(Long from, Long to, long amount, String currency) {

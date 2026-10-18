@@ -39,7 +39,6 @@ public class PostingServiceImpl implements PostingService {
     private final AccountAccessChecker accountAccessChecker;
     private final OutboxEventService outboxEventService;
 
-    // Admin-only (enforced in the controller); joins the caller's transaction when called from JournalEntryService
     @Override
     @Transactional
     public List<PostingDto> createPostings(Long journalEntryId, List<PostingRequest> requests) {
@@ -62,11 +61,12 @@ public class PostingServiceImpl implements PostingService {
             posting.setDirection(r.getDirection());
             posting.setAmount(r.getAmount());
             posting.setCurrency(r.getCurrency());
+            // A credit moves money into the account, a debit moves it out
+            long delta = r.getDirection() == PostingDirection.CREDIT ? r.getAmount() : -r.getAmount();
+            account.setBalance(account.getBalance() + delta);
             return posting;
         }).toList();
-        // TODO: apply postings to account balances
 
-        // Keyed by the journal entry, so it stays ordered after that entry's JournalEntryCreated
         List<PostingDto> dtos = postingMapper.toDtos(postingRepository.saveAll(postings));
         outboxEventService.record(AGGREGATE_TYPE, journalEntryId, POSTINGS_CREATED, dtos);
         return dtos;
@@ -77,7 +77,6 @@ public class PostingServiceImpl implements PostingService {
     public PostingDto getPosting(Long id) {
         Posting posting = postingRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, POSTING_NOT_FOUND));
-        // Someone else's posting looks the same as a missing one, so ids can't be probed
         if (!accountAccessChecker.canAccess(posting.getAccountId())) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, POSTING_NOT_FOUND);
         }
@@ -95,7 +94,6 @@ public class PostingServiceImpl implements PostingService {
                 postingMapper::toDto);
     }
 
-    // Admin-only (enforced in the controller): an entry spans several accounts, often of different users
     @Override
     @Transactional(readOnly = true)
     public List<PostingDto> getJournalEntryPostings(Long journalEntryId) {
