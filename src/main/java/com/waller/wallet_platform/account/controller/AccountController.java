@@ -21,13 +21,13 @@ import com.waller.wallet_platform.account.service.AccountService;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/account")
+@RequestMapping("/api")
 @Slf4j
 public class AccountController {
 
     private final AccountService accountService;
 
-    @PostMapping("/create")
+    @PostMapping("/accounts")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<AccountDto> createNewAccount(@Valid @RequestBody AccountRequest accountRequest) {
         log.info("Endpoint {}", ApiUtils.getMethodName());
@@ -35,12 +35,12 @@ public class AccountController {
     }
 
       // The logged-in user's accounts
-    @GetMapping
+    @GetMapping("/accounts")
     public ApiResponse<ArrayList<AccountDto>> getMyAccounts() {
         return ApiResponse.ok(new ArrayList<>(accountService.getMyAccounts()));
     }
 
-    @GetMapping("/{id}")
+    @GetMapping("/accounts/{id}")
     public ApiResponse<AccountDto> getAccount(@PathVariable("id") Long id) {
         return ApiResponse.ok(accountService.getAccount(id));
     }

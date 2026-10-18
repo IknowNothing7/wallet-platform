@@ -7,7 +7,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-// Query parameters of GET /user; every filter is optional, case-insensitive and matches a substring
+// Query parameters of GET /api/users; every filter is optional, case-insensitive and matches a substring
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder

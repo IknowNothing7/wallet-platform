@@ -74,7 +74,7 @@ class BankWebhookLimitFilterTest {
 
     @Test
     void otherPaths_areNotLimited() throws Exception {
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/transfer/create");
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/transfers");
         request.setContent("01234567890".getBytes(StandardCharsets.UTF_8));
         MockFilterChain chain = new MockFilterChain();
 

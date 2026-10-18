@@ -22,6 +22,8 @@ import com.waller.wallet_platform.outbox.entity.OutboxEvent;
 import com.waller.wallet_platform.outbox.entity.OutboxStatus;
 import com.waller.wallet_platform.outbox.repository.OutboxRepository;
 import com.waller.wallet_platform.security.JwtTokenProvider;
+import com.waller.wallet_platform.transfer.dto.TransferDto;
+import com.waller.wallet_platform.transfer.dto.TransferRequest;
 import com.waller.wallet_platform.transfer.entity.Transfer;
 import com.waller.wallet_platform.transfer.entity.TransferStatus;
 import com.waller.wallet_platform.transfer.repository.TransferRepository;
@@ -68,35 +70,73 @@ class TransferControllerTest extends IntegrationTest {
     }
 
     @Test
-    void createTransfer_persistsTransferAndOutboxEventTogether() {
+    void createTransfer_booksItBeforeResponding() {
         Integer id = given()
                 .auth().oauth2(jwtTokenProvider.generateToken(alice))
                 .contentType(ContentType.JSON)
                 .body(transferBody(aliceUsd.getId(), bobUsd.getId(), 250, "USD"))
         .when()
-                .post("/transfer/create")
+                .post("/api/transfers")
         .then()
                 .statusCode(201)
                 .body("success", equalTo(true))
                 .body("payload.fromAccountId", equalTo(aliceUsd.getId().intValue()))
                 .body("payload.toAccountId", equalTo(bobUsd.getId().intValue()))
                 .body("payload.amount", equalTo(250))
-                .body("payload.status", equalTo("PENDING"))
+                .body("payload.status", equalTo("COMPLETED"))
                 .extract().path("payload.id");
 
         Transfer saved = transferRepository.findById(id.longValue()).orElseThrow();
-        assertThat(saved.getAmount()).isEqualTo(250);
-        assertThat(saved.getStatus()).isEqualTo(TransferStatus.PENDING);
+        assertThat(saved.getStatus()).isEqualTo(TransferStatus.COMPLETED);
+        assertThat(saved.getJournalEntry()).isNotNull();
+        // 2% fee (5) comes out of what Bob gets
+        assertThat(accountRepository.findById(aliceUsd.getId()).orElseThrow().getBalance()).isEqualTo(750);
+        assertThat(accountRepository.findById(bobUsd.getId()).orElseThrow().getBalance()).isEqualTo(245);
 
-        List<OutboxEvent> events = outboxRepository.findAll();
+        // One event for the transfer, in its final state; the ledger's own events go to wallet.journal_entry
+        List<OutboxEvent> events = outboxRepository.findAll().stream()
+                .filter(e -> e.getAggregateType().equals("transfer")).toList();
         assertThat(events).hasSize(1);
         OutboxEvent event = events.getFirst();
-        assertThat(event.getAggregateType()).isEqualTo("transfer");
         assertThat(event.getAggregateId()).isEqualTo(id.longValue());
-        assertThat(event.getEventType()).isEqualTo("TransferCreated");
+        assertThat(event.getEventType()).isEqualTo("TransferCompleted");
         assertThat(event.getStatus()).isEqualTo(OutboxStatus.PENDING);
         assertThat(event.getPayload().get("amount").asLong()).isEqualTo(250);
-        assertThat(event.getPayload().get("toAccountId").asLong()).isEqualTo(bobUsd.getId());
+        assertThat(event.getPayload().get("status").asText()).isEqualTo("COMPLETED");
+    }
+
+    @Test
+    void createTransfer_insufficientFunds_storesFailedTransferAndMovesNothing() {
+        Integer id = given()
+                .auth().oauth2(jwtTokenProvider.generateToken(alice))
+                .contentType(ContentType.JSON)
+                .body(transferBody(aliceUsd.getId(), bobUsd.getId(), 1_001, "USD"))
+        .when()
+                .post("/api/transfers")
+        .then()
+                .statusCode(201)
+                .body("payload.status", equalTo("FAILED"))
+                .body("payload.failureReason", equalTo("Insufficient funds"))
+                .extract().path("payload.id");
+
+        assertThat(transferRepository.findById(id.longValue()).orElseThrow().getStatus()).isEqualTo(TransferStatus.FAILED);
+        assertThat(accountRepository.findById(aliceUsd.getId()).orElseThrow().getBalance()).isEqualTo(1000);
+        assertThat(outboxRepository.findAll()).extracting(OutboxEvent::getEventType).containsExactly("TransferFailed");
+    }
+
+    @Test
+    void createTransfer_fromAnotherUsersAccount_returns404AndWritesNothing() {
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(bob))
+                .contentType(ContentType.JSON)
+                .body(transferBody(aliceUsd.getId(), bobUsd.getId(), 100, "USD"))
+        .when()
+                .post("/api/transfers")
+        .then()
+                .statusCode(404);
+
+        assertThat(transferRepository.count()).isZero();
+        assertThat(accountRepository.findById(aliceUsd.getId()).orElseThrow().getBalance()).isEqualTo(1000);
     }
 
     @Test
@@ -108,7 +148,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(transferBody(aliceUsd.getId(), bobEur.getId(), 250, "USD"))
         .when()
-                .post("/transfer/create")
+                .post("/api/transfers")
         .then()
                 .statusCode(400)
                 .body("success", equalTo(false));
@@ -124,7 +164,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(transferBody(aliceUsd.getId(), bobUsd.getId(), -5, "usd"))
         .when()
-                .post("/transfer/create")
+                .post("/api/transfers")
         .then()
                 .statusCode(400)
                 .body("payload", hasKey("amount"))
@@ -139,7 +179,7 @@ class TransferControllerTest extends IntegrationTest {
         given()
                 .auth().oauth2(jwtTokenProvider.generateToken(bob))
         .when()
-                .get("/transfer/{id}", saved.getId())
+                .get("/api/transfers/{id}", saved.getId())
         .then()
                 .statusCode(200)
                 .body("payload.id", equalTo(saved.getId().intValue()));
@@ -147,7 +187,7 @@ class TransferControllerTest extends IntegrationTest {
         given()
                 .auth().oauth2(jwtTokenProvider.generateToken(stranger))
         .when()
-                .get("/transfer/{id}", saved.getId())
+                .get("/api/transfers/{id}", saved.getId())
         .then()
                 .statusCode(404)
                 .body("message", equalTo("Transfer not found"));
@@ -165,7 +205,7 @@ class TransferControllerTest extends IntegrationTest {
         given()
                 .auth().oauth2(jwtTokenProvider.generateToken(alice))
         .when()
-                .get("/transfer/account/{accountId}", aliceUsd.getId())
+                .get("/api/accounts/{accountId}/transfers", aliceUsd.getId())
         .then()
                 .statusCode(200)
                 .body("payload.content.amount", contains(30, 100))
@@ -176,7 +216,7 @@ class TransferControllerTest extends IntegrationTest {
     void anonymousIsUnauthorized() {
         given()
         .when()
-                .get("/transfer/account/{accountId}", aliceUsd.getId())
+                .get("/api/accounts/{accountId}/transfers", aliceUsd.getId())
         .then()
                 .statusCode(401);
     }
@@ -189,7 +229,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(transferBody(unknownId, bobUsd.getId(), 250, "USD"))
         .when()
-                .post("/transfer/create")
+                .post("/api/transfers")
         .then()
                 .statusCode(404)
                 .body("message", equalTo("Account " + unknownId + " not found"));
@@ -202,7 +242,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(transferBody(bobUsd.getId(), aliceUsd.getId(), 250, "USD"))
         .when()
-                .post("/transfer/create")
+                .post("/api/transfers")
         .then()
                 .statusCode(404)
                 .body("message", equalTo("Account " + bobUsd.getId() + " not found"));
@@ -219,7 +259,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(transferBody(aliceUsd.getId(), unknownId, 250, "USD"))
         .when()
-                .post("/transfer/create")
+                .post("/api/transfers")
         .then()
                 .statusCode(404)
                 .body("message", equalTo("Account " + unknownId + " not found"));
@@ -232,7 +272,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(transferBody(aliceUsd.getId(), aliceUsd.getId(), 250, "USD"))
         .when()
-                .post("/transfer/create")
+                .post("/api/transfers")
         .then()
                 .statusCode(400)
                 .body("message", equalTo("You can not transfer to the same account"));
@@ -248,7 +288,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(transferBody(aliceUsd.getId(), bobUsd.getId(), 250, "EUR"))
         .when()
-                .post("/transfer/create")
+                .post("/api/transfers")
         .then()
                 .statusCode(400)
                 .body("success", equalTo(false));
@@ -264,7 +304,8 @@ class TransferControllerTest extends IntegrationTest {
 
         assertThat(second).isEqualTo(first);
         assertThat(transferRepository.count()).isEqualTo(1);
-        assertThat(outboxRepository.count()).isEqualTo(1);
+        // Booked once: the money moved once
+        assertThat(accountRepository.findById(aliceUsd.getId()).orElseThrow().getBalance()).isEqualTo(750);
     }
 
     @Test
@@ -288,7 +329,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(Map.of("reason", "fraud"))
         .when()
-                .post("/transfer/{id}/reverse", id)
+                .post("/api/transfers/{id}/reverse", id)
         .then()
                 .statusCode(202)
                 .body("payload.status", equalTo("REVERSED"));
@@ -306,7 +347,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(Map.of("reason", "fraud"))
         .when()
-                .post("/transfer/{id}/reverse", id)
+                .post("/api/transfers/{id}/reverse", id)
         .then()
                 .statusCode(403);
 
@@ -327,7 +368,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(Map.of("reason", "fraud"))
         .when()
-                .post("/transfer/{id}/reverse", id)
+                .post("/api/transfers/{id}/reverse", id)
         .then()
                 .statusCode(409)
                 .body("message", equalTo("Destination account no longer has the funds to reverse this transfer"));
@@ -336,19 +377,20 @@ class TransferControllerTest extends IntegrationTest {
     }
 
     @Test
-    void reverseTransfer_pendingTransfer_returns409() {
+    void reverseTransfer_failedTransfer_returns409() {
         AppUser admin = appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
-        Transfer pending = transferRepository.save(transfer(aliceUsd, bobUsd, 500, "USD"));
+        Long failed = transferProcessingService.book(
+                new TransferRequest(aliceUsd.getId(), bobUsd.getId(), 5_000L, "USD")).id();
 
         given()
                 .auth().oauth2(jwtTokenProvider.generateToken(admin))
                 .contentType(ContentType.JSON)
                 .body(Map.of("reason", "fraud"))
         .when()
-                .post("/transfer/{id}/reverse", pending.getId())
+                .post("/api/transfers/{id}/reverse", failed)
         .then()
                 .statusCode(409)
-                .body("message", equalTo("Transfer is PENDING and can not be reversed"));
+                .body("message", equalTo("Transfer is FAILED and can not be reversed"));
     }
 
     @Test
@@ -361,7 +403,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(Map.of("reason", " "))
         .when()
-                .post("/transfer/{id}/reverse", id)
+                .post("/api/transfers/{id}/reverse", id)
         .then()
                 .statusCode(400)
                 .body("payload", hasKey("reason"));
@@ -370,9 +412,10 @@ class TransferControllerTest extends IntegrationTest {
     }
 
     private Long completedTransfer(long amount) {
-        Transfer saved = transferRepository.save(transfer(aliceUsd, bobUsd, amount, "USD"));
-        assertThat(transferProcessingService.process(saved.getId()).status()).isEqualTo(TransferStatus.COMPLETED);
-        return saved.getId();
+        TransferDto booked = transferProcessingService.book(
+                new TransferRequest(aliceUsd.getId(), bobUsd.getId(), amount, "USD"));
+        assertThat(booked.status()).isEqualTo(TransferStatus.COMPLETED);
+        return booked.id();
     }
 
     private io.restassured.response.ValidatableResponse postWithKey(String key, long amount) {
@@ -382,7 +425,7 @@ class TransferControllerTest extends IntegrationTest {
                 .contentType(ContentType.JSON)
                 .body(transferBody(aliceUsd.getId(), bobUsd.getId(), amount, "USD"))
         .when()
-                .post("/transfer/create")
+                .post("/api/transfers")
         .then();
     }
 

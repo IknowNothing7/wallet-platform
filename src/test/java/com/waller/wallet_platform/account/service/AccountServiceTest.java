@@ -147,7 +147,7 @@ class AccountServiceTest {
         mapped.setCurrency("USD");
         when(userRepository.findByEmailIgnoreCase(EMAIL)).thenReturn(Optional.of(user));
         when(accountMapper.createAnAccount(accountRequest)).thenReturn(mapped);
-        when(accountRepository.save(mapped)).thenAnswer(inv -> {
+        when(accountRepository.saveAndFlush(mapped)).thenAnswer(inv -> {
             Account a = inv.getArgument(0);
             a.setId(1L);
             return a;
@@ -158,7 +158,7 @@ class AccountServiceTest {
 
         assertSame(accountDto, result);
         assertSame(user, mapped.getUser());
-        verify(accountRepository).save(mapped);
+        verify(accountRepository).saveAndFlush(mapped);
         verify(outboxEventService).record("account", 1L, "AccountCreated", accountDto);
     }
 

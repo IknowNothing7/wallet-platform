@@ -8,7 +8,10 @@ public interface TransferService {
 
     TransferDto getTransfer(Long id);
 
-    /** With an idempotency key, a retry returns the transfer created by the first request; the key may be null. */
+    /**
+     * Creates and books the transfer in one transaction; the result is COMPLETED or FAILED. With an idempotency key,
+     * a retry returns the transfer created by the first request; the key may be null.
+     */
     TransferDto createTransfer(TransferRequest request, String idempotencyKey);
 
     /** Incoming and outgoing transfers of the account, newest first. */

@@ -25,6 +25,12 @@ import com.waller.wallet_platform.support.IntegrationTest;
 // The native queries the publisher and the retry endpoint rely on, run against real Postgres
 class OutboxRepositoryTest extends IntegrationTest {
 
+    // The rows here are made up to test the queries, not real events
+    @Override
+    protected boolean checksEventContracts() {
+        return false;
+    }
+
     @Autowired
     private OutboxRepository outboxRepository;
 

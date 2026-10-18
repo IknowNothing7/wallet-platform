@@ -37,7 +37,8 @@ public class NotificationTemplates {
             // failureReason is left out on purpose: it can hold the raw bank response
             case "DepositFailed" -> List.of(DEPOSIT_FAILED.draft(p.longValue("accountId"), money(p)));
             case "DepositExpired" -> List.of(DEPOSIT_EXPIRED.draft(p.longValue("accountId"), money(p)));
-            case "TransferCreated" -> List.of(
+            // Only once booked: transfers are synchronous, so there is no earlier event worth telling anyone about
+            case "TransferCompleted" -> List.of(
                     TRANSFER_SENT.draft(p.longValue("fromAccountId"), money(p)),
                     TRANSFER_RECEIVED.draft(p.longValue("toAccountId"), money(p)));
             case "HoldCreated" -> List.of(HOLD_CREATED.draft(p.longValue("accountId"), money(p)));

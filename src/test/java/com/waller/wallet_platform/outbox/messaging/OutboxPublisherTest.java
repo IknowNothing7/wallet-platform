@@ -27,7 +27,7 @@ import org.springframework.kafka.support.SendResult;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.JsonNodeFactory;
 import com.waller.wallet_platform.outbox.repository.OutboxRepository;
 import com.waller.wallet_platform.outbox.entity.OutboxEvent;
 import com.waller.wallet_platform.outbox.entity.OutboxStatus;

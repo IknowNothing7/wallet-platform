@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,9 +24,10 @@ import com.waller.wallet_platform.ledger.dto.PostingRequest;
 import com.waller.wallet_platform.ledger.entity.JournalEntryType;
 import com.waller.wallet_platform.ledger.entity.PostingDirection;
 import com.waller.wallet_platform.ledger.repository.JournalEntryRepository;
-import com.waller.wallet_platform.ledger.service.JournalEntryService;
+import com.waller.wallet_platform.ledger.service.LedgerService;
 import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import com.waller.wallet_platform.transfer.dto.TransferDto;
+import com.waller.wallet_platform.transfer.dto.TransferRequest;
 import com.waller.wallet_platform.transfer.entity.Transfer;
 import com.waller.wallet_platform.transfer.entity.TransferLimit;
 import com.waller.wallet_platform.transfer.entity.TransferStatus;
@@ -39,7 +41,6 @@ import com.waller.wallet_platform.transfer.repository.TransferRepository;
 public class TransferProcessingServiceImpl implements TransferProcessingService {
 
     private static final String TRANSFER_NOT_FOUND = "Transfer not found";
-    private static final String ACCOUNT_NOT_FOUND = "Account not found";
     private static final String AGGREGATE_TYPE = "transfer";
     private static final String TRANSFER_COMPLETED = "TransferCompleted";
     private static final String TRANSFER_FAILED = "TransferFailed";
@@ -47,38 +48,58 @@ public class TransferProcessingServiceImpl implements TransferProcessingService 
     private static final String INSUFFICIENT_FUNDS = "Insufficient funds";
     // 2%, rounded down in the user's favour, same as deposits
     private static final long FEE_BASIS_POINTS = 200;
-    private static final int FAILURE_REASON_MAX_LENGTH = 255;
 
     private final TransferRepository transferRepository;
     private final TransferLimitRepository transferLimitRepository;
     private final TransferMapper transferMapper;
     private final AccountRepository accountRepository;
     private final HoldRepository holdRepository;
-    private final JournalEntryService journalEntryService;
+    private final LedgerService ledgerService;
     private final JournalEntryRepository journalEntryRepository;
     private final OutboxEventService outboxEventService;
     private final SystemAccountService systemAccountService;
-    private final TransferRetryPolicy retryPolicy;
 
     @Override
     @Transactional
-    public TransferDto process(Long transferId) {
-        Transfer transfer = lockTransfer(transferId);
-        if (transfer.getStatus() != TransferStatus.PENDING) {
-            return transferMapper.toDto(transfer);
+    public TransferDto book(TransferRequest request) {
+        Long fromId = request.getIdFromAccount();
+        Long toId = request.getIdToAccount();
+        if (Objects.equals(fromId, toId)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "You can not transfer to the same account");
         }
 
-        Long fromId = transfer.getFromAccount().getId();
-        Long toId = transfer.getToAccount().getId();
-        Account first = lockAccount(Math.min(fromId, toId));
-        Account second = lockAccount(Math.max(fromId, toId));
-        Account from = first.getId().equals(fromId) ? first : second;
-        Account to = first.getId().equals(toId) ? first : second;
+        // Locked before anything reads them, so the balance and hold checks below see the latest committed state and
+        // nothing can change it until this transaction ends. Concurrent transfers on the same account queue here.
+        Locked accounts = lockInIdOrder(fromId, toId);
+        Account from = accounts.from();
+        Account to = accounts.to();
+        if (!from.getCurrency().equals(to.getCurrency())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Transfer currency does not match the target account currency " + to.getCurrency());
+        }
+        if (!from.getCurrency().equals(request.getCurrency())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Transfer currency does not match the account currency " + from.getCurrency());
+        }
+
+        Transfer transfer = new Transfer();
+        transfer.setFromAccount(from);
+        transfer.setToAccount(to);
+        transfer.setAmount(request.getAmount());
+        transfer.setCurrency(request.getCurrency());
 
         String rejection = rejectionReason(transfer, from, to);
         if (rejection != null) {
-            return fail(transfer, rejection);
+            transfer.setStatus(TransferStatus.FAILED);
+            transfer.setFailureReason(rejection);
+            TransferDto dto = saved(transfer, TRANSFER_FAILED);
+            log.info("Transfer {} failed: {}", dto.id(), rejection);
+            return dto;
         }
+
+        // Saved first: the entry references the transfer's id
+        transfer.setStatus(TransferStatus.COMPLETED);
+        transferRepository.saveAndFlush(transfer);
 
         // The fee comes out of what the recipient gets: sender -> recipient + fees
         long fee = fee(transfer);
@@ -90,44 +111,24 @@ public class TransferProcessingServiceImpl implements TransferProcessingService 
             Account fees = systemAccountService.get(SystemAccountKind.FEES, transfer.getCurrency());
             postings.add(new PostingRequest(fees.getId(), PostingDirection.CREDIT, fee, transfer.getCurrency()));
         }
-        JournalEntryDto entry = journalEntryService.createJournalEntry(new JournalEntryRequest(
+        JournalEntryDto entry = ledgerService.post(new JournalEntryRequest(
                 JournalEntryType.TRANSFER,
                 "Transfer " + transfer.getId(),
                 AGGREGATE_TYPE,
                 transfer.getId(),
                 postings));
 
-        transfer.setStatus(TransferStatus.COMPLETED);
         transfer.setJournalEntry(journalEntryRepository.getReferenceById(entry.id()));
         log.info("Transfer {} completed, fee {}, entry {}", transfer.getId(), fee, entry.id());
-        return transitioned(transfer, TRANSFER_COMPLETED);
-    }
-
-    @Override
-    @Transactional
-    public TransferDto recordFailedAttempt(Long transferId, String error) {
-        Transfer transfer = lockTransfer(transferId);
-        if (transfer.getStatus() != TransferStatus.PENDING) {
-            return transferMapper.toDto(transfer);
-        }
-        int attempts = transfer.getAttempts() + 1;
-        transfer.setAttempts(attempts);
-        if (retryPolicy.exhausted(attempts)) {
-            transfer.setNextAttemptAt(null);
-            log.error("Transfer {} could not be processed in {} attempts, marking FAILED: {}", transferId, attempts, error);
-            return fail(transfer, truncate("Processing failed after " + attempts + " attempts: " + error));
-        }
-        transfer.setNextAttemptAt(retryPolicy.nextAttemptAt(attempts, Instant.now()));
-        log.warn("Processing of transfer {} failed (attempt {}/{}), next try at {}: {}",
-                transferId, attempts, retryPolicy.maxAttempts(), transfer.getNextAttemptAt(), error);
-        return transferMapper.toDto(transferRepository.saveAndFlush(transfer));
+        return saved(transfer, TRANSFER_COMPLETED);
     }
 
     // Undoes the whole entry, fee included: recipient + fees -> sender
     @Override
     @Transactional
     public TransferDto reverse(Long transferId, String reason) {
-        Transfer transfer = lockTransfer(transferId);
+        Transfer transfer = transferRepository.findByIdForUpdate(transferId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, TRANSFER_NOT_FOUND));
         if (transfer.getStatus() == TransferStatus.REVERSED) {
             return transferMapper.toDto(transfer);
         }
@@ -136,13 +137,10 @@ public class TransferProcessingServiceImpl implements TransferProcessingService 
                     "Transfer is " + transfer.getStatus() + " and can not be reversed");
         }
 
-        // Same id order as process(), so a reversal and a transfer between the same accounts can't deadlock
-        Long fromId = transfer.getFromAccount().getId();
-        Long toId = transfer.getToAccount().getId();
-        Account first = lockAccount(Math.min(fromId, toId));
-        Account second = lockAccount(Math.max(fromId, toId));
-        Account from = first.getId().equals(fromId) ? first : second;
-        Account to = first.getId().equals(toId) ? first : second;
+        // Same id order as book(), so a reversal and a transfer between the same accounts can't deadlock
+        Locked accounts = lockInIdOrder(transfer.getFromAccount().getId(), transfer.getToAccount().getId());
+        Account from = accounts.from();
+        Account to = accounts.to();
 
         // Refused rather than going negative; the transfer stays COMPLETED (it was booked, so it isn't FAILED)
         long fee = fee(transfer);
@@ -160,7 +158,7 @@ public class TransferProcessingServiceImpl implements TransferProcessingService 
             postings.add(new PostingRequest(fees.getId(), PostingDirection.DEBIT, fee, transfer.getCurrency()));
         }
         postings.add(new PostingRequest(from.getId(), PostingDirection.CREDIT, transfer.getAmount(), transfer.getCurrency()));
-        JournalEntryDto entry = journalEntryService.createJournalEntry(new JournalEntryRequest(
+        JournalEntryDto entry = ledgerService.post(new JournalEntryRequest(
                 JournalEntryType.REVERSAL,
                 "Reversal of transfer " + transfer.getId() + (reason == null ? "" : ": " + reason),
                 AGGREGATE_TYPE,
@@ -170,7 +168,7 @@ public class TransferProcessingServiceImpl implements TransferProcessingService 
         // journalEntry keeps pointing at the original entry; the reversal is found by reference ("transfer", id)
         transfer.setStatus(TransferStatus.REVERSED);
         log.info("Transfer {} reversed, entry {}", transfer.getId(), entry.id());
-        return transitioned(transfer, TRANSFER_REVERSED);
+        return saved(transfer, TRANSFER_REVERSED);
     }
 
     // null when the transfer can be booked
@@ -180,10 +178,6 @@ public class TransferProcessingServiceImpl implements TransferProcessingService 
         }
         if (to.getStatus() != AccountStatus.ACTIVE) {
             return "Destination account is not active";
-        }
-        // Accounts can't change currency, but the transfer row could have been created with a stale check
-        if (!from.getCurrency().equals(transfer.getCurrency()) || !to.getCurrency().equals(transfer.getCurrency())) {
-            return "Transfer currency does not match the accounts";
         }
         // Money reserved by active holds is not available, same rule as HoldServiceImpl.createHold
         long held = holdRepository.sumAmountByAccountIdAndStatus(from.getId(), HoldStatus.ACTIVE, Instant.now());
@@ -197,12 +191,14 @@ public class TransferProcessingServiceImpl implements TransferProcessingService 
         return transfer.getAmount() * FEE_BASIS_POINTS / 10_000;
     }
 
+    // Exact under the source account's lock: every other booking from this account waits for it
     private String limitRejection(Transfer transfer, Account from) {
         TransferLimit limit = transferLimitRepository.findByAccountId(from.getId())
                 .or(() -> transferLimitRepository.findByCurrency(transfer.getCurrency()))
                 .orElse(null);
+        // Fail closed: a currency is enabled for transfers by giving it a transfer_limit row (V5 seeds USD and EUR)
         if (limit == null) {
-            return null;
+            return "Transfers in " + transfer.getCurrency() + " are not enabled";
         }
         if (limit.getPerTransferMax() != null && transfer.getAmount() > limit.getPerTransferMax()) {
             return "Amount exceeds the per-transfer limit";
@@ -217,32 +213,29 @@ public class TransferProcessingServiceImpl implements TransferProcessingService 
         return null;
     }
 
-    private static String truncate(String reason) {
-        return reason.length() <= FAILURE_REASON_MAX_LENGTH ? reason : reason.substring(0, FAILURE_REASON_MAX_LENGTH);
+    private record Locked(Account from, Account to) {
     }
 
-    private TransferDto fail(Transfer transfer, String reason) {
-        transfer.setStatus(TransferStatus.FAILED);
-        transfer.setFailureReason(reason);
-        log.info("Transfer {} failed: {}", transfer.getId(), reason);
-        return transitioned(transfer, TRANSFER_FAILED);
+    // Always lower id first, whichever way the money goes, so two transfers in opposite directions can't deadlock
+    private Locked lockInIdOrder(Long fromId, Long toId) {
+        Account first = lockAccount(Math.min(fromId, toId));
+        Account second = lockAccount(Math.max(fromId, toId));
+        return first.getId().equals(fromId) ? new Locked(first, second) : new Locked(second, first);
     }
 
-    // The lock serializes the job and a direct call, so the status check above can't go stale
-    private Transfer lockTransfer(Long id) {
-        return transferRepository.findByIdForUpdate(id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, TRANSFER_NOT_FOUND));
-    }
-
+    // System accounts are filtered out, so they answer like a missing account
     private Account lockAccount(Long id) {
-        return accountRepository.findUserAccountByIdForUpdate(id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, ACCOUNT_NOT_FOUND));
+        return accountRepository.findUserAccountByIdForUpdate(id).orElseThrow(() -> accountNotFound(id));
     }
 
-    // Saved and flushed first so the event carries the new updatedAt
-    private TransferDto transitioned(Transfer transfer, String eventType) {
+    private static ResponseStatusException accountNotFound(Long id) {
+        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Account " + id + " not found");
+    }
+
+    // Saved and flushed first so the event carries the id and the new updatedAt
+    private TransferDto saved(Transfer transfer, String eventType) {
         TransferDto dto = transferMapper.toDto(transferRepository.saveAndFlush(transfer));
-        outboxEventService.record(AGGREGATE_TYPE, transfer.getId(), eventType, dto);
+        outboxEventService.record(AGGREGATE_TYPE, dto.id(), eventType, dto);
         return dto;
     }
 }

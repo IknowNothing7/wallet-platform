@@ -25,14 +25,14 @@ import com.waller.wallet_platform.hold.dto.HoldRequest;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/hold")
+@RequestMapping("/api")
 @Slf4j
 public class HoldController {
 
     private final HoldService holdService;
 
     // A merchant reserves funds on a customer's account, e.g. at checkout
-    @PostMapping("/create")
+    @PostMapping("/holds")
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasRole('MERCHANT')")
     public ApiResponse<HoldDto> createHold(@Valid @RequestBody HoldRequest request) {
@@ -40,12 +40,12 @@ public class HoldController {
         return ApiResponse.ok(holdService.createHold(request));
     }
 
-    @GetMapping("/{id}")
+    @GetMapping("/holds/{id}")
     public ApiResponse<HoldDto> getHold(@PathVariable("id") Long id) {
         return ApiResponse.ok(holdService.getHold(id));
     }
 
-    @GetMapping("/account/{accountId}")
+    @GetMapping("/accounts/{accountId}/holds")
     public ApiResponse<PageResponse<HoldDto>> getAccountHolds(
             @PathVariable("accountId") Long accountId,
             @RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
@@ -54,20 +54,20 @@ public class HoldController {
     }
 
     // Safe to retry: repeating a transition on a hold already in that state returns it unchanged
-    @PostMapping("/{id}/capture")
+    @PostMapping("/holds/{id}/capture")
     @PreAuthorize("hasRole('MERCHANT')")
     public ApiResponse<HoldDto> captureHold(@PathVariable("id") Long id,
                                             @Valid @RequestBody HoldCaptureRequest request) {
         return ApiResponse.ok(holdService.captureHold(id, request));
     }
 
-    @PostMapping("/{id}/release")
+    @PostMapping("/holds/{id}/release")
     @PreAuthorize("hasRole('MERCHANT')")
     public ApiResponse<HoldDto> releaseHold(@PathVariable("id") Long id) {
         return ApiResponse.ok(holdService.releaseHold(id));
     }
 
-    @PostMapping("/{id}/expire")
+    @PostMapping("/holds/{id}/expire")
     @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<HoldDto> expireHold(@PathVariable("id") Long id) {
         return ApiResponse.ok(holdService.expireHold(id));

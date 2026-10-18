@@ -1,7 +1,5 @@
 package com.waller.wallet_platform.transfer.service;
 
-import com.waller.wallet_platform.account.entity.Account;
-import com.waller.wallet_platform.account.repository.AccountRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
@@ -11,7 +9,6 @@ import org.springframework.web.server.ResponseStatusException;
 import com.waller.wallet_platform.common.idempotency.IdempotencyService;
 import com.waller.wallet_platform.common.web.PageResponse;
 import com.waller.wallet_platform.security.AccountAccessChecker;
-import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import lombok.RequiredArgsConstructor;
 import com.waller.wallet_platform.transfer.dto.TransferDto;
 import com.waller.wallet_platform.transfer.mapper.TransferMapper;
@@ -19,7 +16,6 @@ import com.waller.wallet_platform.transfer.repository.TransferRepository;
 import com.waller.wallet_platform.transfer.dto.TransferRequest;
 import com.waller.wallet_platform.transfer.entity.Transfer;
 
-import java.util.Objects;
 import java.util.Optional;
 
 @Service
@@ -29,15 +25,12 @@ public class TransferServiceImpl implements TransferService {
 
     private static final String TRANSFER_NOT_FOUND = "Transfer not found";
     private static final String ACCOUNT_NOT_FOUND = "Account not found";
-    private static final String AGGREGATE_TYPE = "transfer";
-    private static final String TRANSFER_CREATED = "TransferCreated";
-    private static final String CREATE_ENDPOINT = "POST /transfer/create";
+    private static final String CREATE_ENDPOINT = "POST /api/transfers";
 
     private final TransferRepository transferRepository;
     private final TransferMapper transferMapper;
     private final AccountAccessChecker accountAccessChecker;
-    private final AccountRepository accountRepository;
-    private final OutboxEventService outboxEventService;
+    private final TransferProcessingService transferProcessingService;
     private final IdempotencyService idempotencyService;
 
     @Override
@@ -52,6 +45,7 @@ public class TransferServiceImpl implements TransferService {
         return transferMapper.toDto(transfer);
     }
 
+    // Booked synchronously: the response already says COMPLETED or FAILED, there is nothing to poll for
     @Override
     @Transactional
     public TransferDto createTransfer(TransferRequest request, String idempotencyKey) {
@@ -64,42 +58,15 @@ public class TransferServiceImpl implements TransferService {
             }
         }
 
-        Account accountFrom = accountRepository.findUserAccountById(request.getIdFromAccount())
-                .filter(t->accountAccessChecker.canAccess(request.getIdFromAccount()))
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "Account " + request.getIdFromAccount() + " not found"));
-
-        Account accountTo = accountRepository.findUserAccountById(request.getIdToAccount())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "Account " + request.getIdToAccount() + " not found"));
-
-        if (!accountFrom.getCurrency().equals(accountTo.getCurrency())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Transfer currency does not match  the target account currency " + accountTo.getCurrency());
+        // Someone else's account answers like a missing one, so account ids can't be probed
+        if (!accountAccessChecker.canAccess(request.getIdFromAccount())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Account " + request.getIdFromAccount() + " not found");
         }
-
-        if (!accountFrom.getCurrency().equals(request.getCurrency())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Transfer currency does not match the account currency " + accountFrom.getCurrency());
-        }
-
-        if(Objects.equals(accountFrom.getId(), accountTo.getId())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "You can not transfer to the same account");
-        }
-
-        Transfer transfer = transferRepository.saveAndFlush(transferMapper.requestToEntity(request));
-        transfer.setFromAccount(accountFrom);
-        transfer.setToAccount(accountTo);
-        log.info("Transfer {} created for account {}", transfer.getId(), accountFrom.getId());
-
-        TransferDto dto = transferMapper.toDto(transfer);
-        outboxEventService.record(AGGREGATE_TYPE, transfer.getId(), TRANSFER_CREATED, dto);
+        TransferDto dto = transferProcessingService.book(request);
         if (idempotencyKey != null) {
             idempotencyService.save(idempotencyKey, CREATE_ENDPOINT, request, HttpStatus.CREATED, dto);
         }
         return dto;
-
     }
 
     @Override

@@ -11,6 +11,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import com.waller.wallet_platform.ledger.entity.JournalEntryType;
 
+// What a domain service asks LedgerService to post; built in code, never read from an HTTP body
 @NoArgsConstructor
 @AllArgsConstructor
 @Getter

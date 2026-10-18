@@ -6,19 +6,12 @@ import org.mapstruct.MappingTarget;
 import org.mapstruct.NullValuePropertyMappingStrategy;
 import com.waller.wallet_platform.auth.dto.RegistrationRequest;
 import com.waller.wallet_platform.user.dto.AppUserDto;
-import com.waller.wallet_platform.user.dto.AppUserRequest;
 import com.waller.wallet_platform.user.dto.UpdateUserRequest;
+import com.waller.wallet_platform.user.dto.UserEvent;
 import com.waller.wallet_platform.user.entity.AppUser;
 
 @Mapper(componentModel = "spring",nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
 public interface AppUserMapper {
-
-    @Mapping(target = "id", ignore = true)
-    @Mapping(target = "createdAt", ignore = true)
-    @Mapping(target = "updatedAt", ignore = true)
-    @Mapping(target = "role", constant = "USER")
-    @Mapping(target = "passwordHash", ignore = true)
-    AppUser requestToEntity(AppUserRequest request);
 
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "createdAt", ignore = true)
@@ -37,5 +30,7 @@ public interface AppUserMapper {
     void updateEntity(UpdateUserRequest request, @MappingTarget AppUser user);
 
     AppUserDto toDto(AppUser user);
+
+    UserEvent toEvent(AppUser user);
 
 }

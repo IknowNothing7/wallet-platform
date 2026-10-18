@@ -53,7 +53,7 @@ class OutboxEventControllerSecurityTest {
 
     @Test
     void noUser_getEvents_is401() throws Exception {
-        mockMvc.perform(get("/outbox"))
+        mockMvc.perform(get("/api/outbox-events"))
                 .andExpect(status().isUnauthorized());
 
         verifyNoInteractions(outboxEventService);
@@ -62,7 +62,7 @@ class OutboxEventControllerSecurityTest {
     @Test
     @WithMockUser(roles = "USER")
     void user_getEvents_is403() throws Exception {
-        mockMvc.perform(get("/outbox"))
+        mockMvc.perform(get("/api/outbox-events"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.success").value(false));
 
@@ -72,7 +72,7 @@ class OutboxEventControllerSecurityTest {
     @Test
     @WithMockUser(roles = "MERCHANT")
     void merchant_getEvents_is403() throws Exception {
-        mockMvc.perform(get("/outbox"))
+        mockMvc.perform(get("/api/outbox-events"))
                 .andExpect(status().isForbidden());
 
         verifyNoInteractions(outboxEventService);
@@ -81,7 +81,7 @@ class OutboxEventControllerSecurityTest {
     @Test
     @WithMockUser(roles = "USER")
     void user_getEvent_is403() throws Exception {
-        mockMvc.perform(get("/outbox/1"))
+        mockMvc.perform(get("/api/outbox-events/1"))
                 .andExpect(status().isForbidden());
 
         verifyNoInteractions(outboxEventService);
@@ -90,7 +90,7 @@ class OutboxEventControllerSecurityTest {
     @Test
     @WithMockUser(roles = "USER")
     void user_retryEvent_is403() throws Exception {
-        mockMvc.perform(post("/outbox/1/retry"))
+        mockMvc.perform(post("/api/outbox-events/1/retry"))
                 .andExpect(status().isForbidden());
 
         verifyNoInteractions(outboxEventService);
@@ -101,7 +101,7 @@ class OutboxEventControllerSecurityTest {
     void admin_getEvents_reachesService() throws Exception {
         when(outboxEventService.getEvents(null, 0, 20)).thenReturn(new PageResponse<>(List.of(EVENT), 0, 20, 1, 1));
 
-        mockMvc.perform(get("/outbox"))
+        mockMvc.perform(get("/api/outbox-events"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.payload.content[0].id").value(1));
     }
@@ -111,7 +111,7 @@ class OutboxEventControllerSecurityTest {
     void admin_retryEvent_reachesService() throws Exception {
         when(outboxEventService.retryEvent(1L)).thenReturn(EVENT);
 
-        mockMvc.perform(post("/outbox/1/retry"))
+        mockMvc.perform(post("/api/outbox-events/1/retry"))
                 .andExpect(status().isOk());
 
         verify(outboxEventService).retryEvent(1L);

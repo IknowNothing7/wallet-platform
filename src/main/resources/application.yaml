@@ -9,6 +9,10 @@ spring:
   jpa:
     hibernate:
       ddl-auto: validate
+    properties:
+      # jsonb columns (outbox payload, idempotency response) hold Jackson 3 JsonNodes. Jackson 2 is still on the
+      # classpath (swagger-core, jjwt-jackson), so Hibernate is told which one to use rather than left to guess.
+      hibernate.type.json_format_mapper: org.hibernate.type.format.jackson.Jackson3JsonFormatMapper
 
   kafka:
     # Overridden automatically by Docker Compose support in development
@@ -67,21 +71,27 @@ bank:
       window: PT1M
 
 deposit:
+  submission:
+    threads: 4            # concurrent bank calls for new deposits (DepositSubmissionListener)
+    queue-capacity: 200   # beyond this, new deposits wait for reconciliation instead
   pending-ttl: PT30M      # PENDING this long: ask the bank once more, then expire
   reconciliation:
     poll-interval: PT30S
     stale-after: PT1M     # PENDING this long without a webhook: ask the bank
     batch-size: 50
 
-transfer:
-  processing:
-    poll-interval: PT5S
-    pending-for: PT0S     # processing is asynchronous (only this job calls process()), so pick transfers up at once
+hold:
+  max-ttl: P7D            # latest expiresAt a merchant may ask for, counted from creation
+  expiry:
+    poll-interval: PT30S  # how often HoldExpiryJob marks holds past expiresAt as EXPIRED
     batch-size: 100
-    stale-after: PT1M     # PENDING this long after creation counts as stale (wallet_transfer_stale_* metrics)
-    max-attempts: 10      # processing exceptions before a transfer is marked FAILED
-    initial-backoff: PT5S # doubles per failed attempt...
-    max-backoff: PT5M     # ...up to this; 10 attempts span about 20 minutes
+
+admin:
+  # Creates this ADMIN on startup if no user has the email yet; the only way to get an admin. Leave unset to skip.
+  bootstrap:
+    email: ${ADMIN_EMAIL:}
+    password: ${ADMIN_PASSWORD:}
+    name: ${ADMIN_NAME:Admin}
 
 management:
   endpoints:

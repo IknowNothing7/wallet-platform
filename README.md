@@ -26,6 +26,18 @@ docker compose up
 
 Grafana is on http://localhost:3001 and Prometheus on http://localhost:9090.
 
+### Admins and merchants
+
+Everyone who signs up through `POST /api/auth/register` is a `USER`. The first `ADMIN` is created on startup from
+environment variables, if no user has that email yet:
+
+```bash
+ADMIN_EMAIL=admin@example.com ADMIN_PASSWORD='Change-me-1!' docker compose --profile app up --build
+```
+
+That admin makes a user a merchant (or back) with `PUT /api/users/{id}/role` and the body `{"role": "MERCHANT"}`. The
+`ADMIN` role can't be granted or taken away over the API.
+
 ## Test
 
 Docker must be running, because the integration tests use Testcontainers.
@@ -36,4 +48,5 @@ Docker must be running, because the integration tests use Testcontainers.
 
 ## More
 
+- Design decisions (locking, bank retries, events, schema): [docs/decisions.md](docs/decisions.md)
 - Event schemas: [contracts/](contracts/README.md)

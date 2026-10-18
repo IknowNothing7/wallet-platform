@@ -3,13 +3,9 @@ package com.waller.wallet_platform.ledger.service;
 import java.util.List;
 import com.waller.wallet_platform.common.web.PageResponse;
 import com.waller.wallet_platform.ledger.dto.JournalEntryDto;
-import com.waller.wallet_platform.ledger.dto.JournalEntryRequest;
 
-// Journal entries are always written together with their balanced postings
+// Read side of the ledger; entries are only ever written through LedgerService
 public interface JournalEntryService {
-
-    /** Creates the entry and its postings in one transaction. */
-    JournalEntryDto createJournalEntry(JournalEntryRequest request);
 
     /** The entry with all of its postings. */
     JournalEntryDto getJournalEntry(Long id);

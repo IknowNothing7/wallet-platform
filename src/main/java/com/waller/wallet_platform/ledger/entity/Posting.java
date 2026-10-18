@@ -3,6 +3,7 @@ package com.waller.wallet_platform.ledger.entity;
 import java.io.Serializable;
 import java.time.Instant;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.Immutable;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 import jakarta.persistence.Column;
@@ -17,7 +18,9 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-@Entity 
+// Written once by LedgerService and never changed: Hibernate skips updates, and V11 revokes UPDATE/DELETE
+@Entity
+@Immutable
 @Table (name = "posting")
 @NoArgsConstructor 
 @Getter 

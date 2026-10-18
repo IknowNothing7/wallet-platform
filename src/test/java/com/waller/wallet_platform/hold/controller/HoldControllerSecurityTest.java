@@ -65,7 +65,7 @@ class HoldControllerSecurityTest {
 
     @Test
     void noUser_getHold_is401() throws Exception {
-        mockMvc.perform(get("/hold/10"))
+        mockMvc.perform(get("/api/holds/10"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false));
 
@@ -74,7 +74,7 @@ class HoldControllerSecurityTest {
 
     @Test
     void noUser_createHold_is401() throws Exception {
-        mockMvc.perform(post("/hold/create").contentType(MediaType.APPLICATION_JSON).content(HOLD_BODY))
+        mockMvc.perform(post("/api/holds").contentType(MediaType.APPLICATION_JSON).content(HOLD_BODY))
                 .andExpect(status().isUnauthorized());
 
         verifyNoInteractions(holdService);
@@ -82,7 +82,7 @@ class HoldControllerSecurityTest {
 
     @Test
     void noUser_captureHold_is401() throws Exception {
-        mockMvc.perform(post("/hold/10/capture").contentType(MediaType.APPLICATION_JSON).content(CAPTURE_BODY))
+        mockMvc.perform(post("/api/holds/10/capture").contentType(MediaType.APPLICATION_JSON).content(CAPTURE_BODY))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false));
 
@@ -91,7 +91,7 @@ class HoldControllerSecurityTest {
 
     @Test
     void noUser_releaseHold_is401() throws Exception {
-        mockMvc.perform(post("/hold/10/release"))
+        mockMvc.perform(post("/api/holds/10/release"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false));
 
@@ -100,7 +100,7 @@ class HoldControllerSecurityTest {
 
     @Test
     void noUser_expireHold_is401() throws Exception {
-        mockMvc.perform(post("/hold/10/expire"))
+        mockMvc.perform(post("/api/holds/10/expire"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false));
 
@@ -114,7 +114,7 @@ class HoldControllerSecurityTest {
     void merchant_createHold_is201() throws Exception {
         when(holdService.createHold(any(HoldRequest.class))).thenReturn(HOLD);
 
-        mockMvc.perform(post("/hold/create").contentType(MediaType.APPLICATION_JSON).content(HOLD_BODY))
+        mockMvc.perform(post("/api/holds").contentType(MediaType.APPLICATION_JSON).content(HOLD_BODY))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.payload.id").value(10));
     }
@@ -122,7 +122,7 @@ class HoldControllerSecurityTest {
     @Test
     @WithMockUser(roles = "USER")
     void user_createHold_is403() throws Exception {
-        mockMvc.perform(post("/hold/create").contentType(MediaType.APPLICATION_JSON).content(HOLD_BODY))
+        mockMvc.perform(post("/api/holds").contentType(MediaType.APPLICATION_JSON).content(HOLD_BODY))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.success").value(false));
 
@@ -132,7 +132,7 @@ class HoldControllerSecurityTest {
     @Test
     @WithMockUser(roles = "ADMIN")
     void admin_createHold_is403() throws Exception {
-        mockMvc.perform(post("/hold/create").contentType(MediaType.APPLICATION_JSON).content(HOLD_BODY))
+        mockMvc.perform(post("/api/holds").contentType(MediaType.APPLICATION_JSON).content(HOLD_BODY))
                 .andExpect(status().isForbidden());
 
         verifyNoInteractions(holdService);
@@ -145,7 +145,7 @@ class HoldControllerSecurityTest {
     void merchant_captureHold_is200() throws Exception {
         when(holdService.captureHold(eq(10L), any(HoldCaptureRequest.class))).thenReturn(HOLD);
 
-        mockMvc.perform(post("/hold/10/capture").contentType(MediaType.APPLICATION_JSON).content(CAPTURE_BODY))
+        mockMvc.perform(post("/api/holds/10/capture").contentType(MediaType.APPLICATION_JSON).content(CAPTURE_BODY))
                 .andExpect(status().isOk());
 
         verify(holdService).captureHold(eq(10L), any(HoldCaptureRequest.class));
@@ -154,7 +154,7 @@ class HoldControllerSecurityTest {
     @Test
     @WithMockUser(roles = "USER")
     void user_captureHold_is403() throws Exception {
-        mockMvc.perform(post("/hold/10/capture").contentType(MediaType.APPLICATION_JSON).content(CAPTURE_BODY))
+        mockMvc.perform(post("/api/holds/10/capture").contentType(MediaType.APPLICATION_JSON).content(CAPTURE_BODY))
                 .andExpect(status().isForbidden());
 
         verifyNoInteractions(holdService);
@@ -163,7 +163,7 @@ class HoldControllerSecurityTest {
     @Test
     @WithMockUser(roles = "ADMIN")
     void admin_captureHold_is403() throws Exception {
-        mockMvc.perform(post("/hold/10/capture").contentType(MediaType.APPLICATION_JSON).content(CAPTURE_BODY))
+        mockMvc.perform(post("/api/holds/10/capture").contentType(MediaType.APPLICATION_JSON).content(CAPTURE_BODY))
                 .andExpect(status().isForbidden());
 
         verifyNoInteractions(holdService);
@@ -176,7 +176,7 @@ class HoldControllerSecurityTest {
     void merchant_releaseHold_is200() throws Exception {
         when(holdService.releaseHold(10L)).thenReturn(HOLD);
 
-        mockMvc.perform(post("/hold/10/release"))
+        mockMvc.perform(post("/api/holds/10/release"))
                 .andExpect(status().isOk());
 
         verify(holdService).releaseHold(10L);
@@ -185,7 +185,7 @@ class HoldControllerSecurityTest {
     @Test
     @WithMockUser(roles = "USER")
     void user_releaseHold_is403() throws Exception {
-        mockMvc.perform(post("/hold/10/release"))
+        mockMvc.perform(post("/api/holds/10/release"))
                 .andExpect(status().isForbidden());
 
         verifyNoInteractions(holdService);
@@ -194,7 +194,7 @@ class HoldControllerSecurityTest {
     @Test
     @WithMockUser(roles = "ADMIN")
     void admin_releaseHold_is403() throws Exception {
-        mockMvc.perform(post("/hold/10/release"))
+        mockMvc.perform(post("/api/holds/10/release"))
                 .andExpect(status().isForbidden());
 
         verifyNoInteractions(holdService);
@@ -207,7 +207,7 @@ class HoldControllerSecurityTest {
     void admin_expireHold_is200() throws Exception {
         when(holdService.expireHold(10L)).thenReturn(HOLD);
 
-        mockMvc.perform(post("/hold/10/expire"))
+        mockMvc.perform(post("/api/holds/10/expire"))
                 .andExpect(status().isOk());
 
         verify(holdService).expireHold(10L);
@@ -216,7 +216,7 @@ class HoldControllerSecurityTest {
     @Test
     @WithMockUser(roles = "MERCHANT")
     void merchant_expireHold_is403() throws Exception {
-        mockMvc.perform(post("/hold/10/expire"))
+        mockMvc.perform(post("/api/holds/10/expire"))
                 .andExpect(status().isForbidden());
 
         verifyNoInteractions(holdService);
@@ -225,7 +225,7 @@ class HoldControllerSecurityTest {
     @Test
     @WithMockUser(roles = "USER")
     void user_expireHold_is403() throws Exception {
-        mockMvc.perform(post("/hold/10/expire"))
+        mockMvc.perform(post("/api/holds/10/expire"))
                 .andExpect(status().isForbidden());
 
         verifyNoInteractions(holdService);
@@ -238,7 +238,7 @@ class HoldControllerSecurityTest {
     void user_getHold_reachesService() throws Exception {
         when(holdService.getHold(10L)).thenReturn(HOLD);
 
-        mockMvc.perform(get("/hold/10"))
+        mockMvc.perform(get("/api/holds/10"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.payload.id").value(10));
     }
@@ -248,7 +248,7 @@ class HoldControllerSecurityTest {
     void user_getAccountHolds_reachesService() throws Exception {
         when(holdService.getAccountHolds(1L, 0, 20)).thenReturn(new PageResponse<>(List.of(HOLD), 0, 20, 1, 1));
 
-        mockMvc.perform(get("/hold/account/1"))
+        mockMvc.perform(get("/api/accounts/1/holds"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.payload.content[0].id").value(10));
     }

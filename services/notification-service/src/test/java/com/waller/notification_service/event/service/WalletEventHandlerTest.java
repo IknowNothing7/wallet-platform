@@ -50,7 +50,7 @@ class WalletEventHandlerTest {
 
     @Test
     void alreadyProcessedEvent_isSkipped() {
-        WalletEvent event = event(1L, "TransferCreated", "{}");
+        WalletEvent event = event(1L, "TransferCompleted", "{}");
         when(processedEventRepository.existsById(1L)).thenReturn(true);
 
         handler.handle(event);
@@ -75,7 +75,7 @@ class WalletEventHandlerTest {
 
     @Test
     void eachDraft_goesToTheOwnerOfItsAccount() {
-        WalletEvent event = event(2L, "TransferCreated", "{}");
+        WalletEvent event = event(2L, "TransferCompleted", "{}");
         NotificationDraft sent = new NotificationDraft(10L, "Money sent", "You sent 1.00 USD");
         NotificationDraft received = new NotificationDraft(20L, "Money received", "You received 1.00 USD");
         when(notificationTemplates.render(event)).thenReturn(List.of(sent, received));
@@ -86,7 +86,7 @@ class WalletEventHandlerTest {
 
         verify(notificationService).create(100L, event, sent);
         verify(notificationService).create(200L, event, received);
-        verifyMarkedProcessed(2L, "TransferCreated");
+        verifyMarkedProcessed(2L, "TransferCompleted");
     }
 
     @Test

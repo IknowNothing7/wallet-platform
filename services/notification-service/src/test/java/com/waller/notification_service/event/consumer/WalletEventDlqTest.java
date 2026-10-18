@@ -100,7 +100,7 @@ class WalletEventDlqTest {
     void malformedJson_goesStraightToDltWithoutReachingHandler() throws Exception {
         long eventId = EVENT_IDS.incrementAndGet();
         String key = UUID.randomUUID().toString();
-        kafkaTemplate.send(walletRecord(key, eventId, "TransferCreated", "{not json")).get();
+        kafkaTemplate.send(walletRecord(key, eventId, "TransferCompleted", "{not json")).get();
 
         ConsumerRecord<String, String> dead = awaitDeadLetter(key);
 
@@ -117,7 +117,7 @@ class WalletEventDlqTest {
         // No AccountCreated was consumed for these accounts, so every attempt throws UnknownAccountException
         String payload = """
                 {"fromAccountId": 900001, "toAccountId": 900002, "amount": 100, "currency": "USD"}""";
-        kafkaTemplate.send(walletRecord(key, eventId, "TransferCreated", payload)).get();
+        kafkaTemplate.send(walletRecord(key, eventId, "TransferCompleted", payload)).get();
 
         ConsumerRecord<String, String> dead = awaitDeadLetter(key);
 

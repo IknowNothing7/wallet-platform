@@ -47,10 +47,10 @@ class NotificationTemplatesTest {
     }
 
     @Test
-    void transferCreated_notifiesSenderAndReceiver() {
+    void transferCompleted_notifiesSenderAndReceiver() {
         String payload = "{\"fromAccountId\": 10, \"toAccountId\": 20, \"amount\": 250, \"currency\": \"USD\"}";
 
-        assertThat(templates.render(event("TransferCreated", payload)))
+        assertThat(templates.render(event("TransferCompleted", payload)))
                 .extracting(NotificationDraft::accountId, NotificationDraft::title, NotificationDraft::body)
                 .containsExactly(
                         tuple(10L, "Money sent", "You sent 2.50 USD"),

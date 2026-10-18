@@ -31,6 +31,7 @@ import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import com.waller.wallet_platform.security.AccessTokenDenylist;
 import com.waller.wallet_platform.security.JwtTokenProvider;
 import com.waller.wallet_platform.user.dto.AppUserDto;
+import com.waller.wallet_platform.user.dto.UserEvent;
 import com.waller.wallet_platform.user.entity.AppUser;
 import com.waller.wallet_platform.user.entity.UserRole;
 import com.waller.wallet_platform.user.mapper.AppUserMapper;
@@ -146,6 +147,8 @@ public class AuthServiceTest {
         when(passwordEncoder.encode(PASSWORD)).thenReturn(PASSWORD_HASH);
         when(appUserRepository.saveAndFlush(mapped)).thenReturn(user);
         when(appUserMapper.toDto(user)).thenReturn(appUserDto);
+        UserEvent userEvent = new UserEvent(1L, null, null, UserRole.USER);
+        when(appUserMapper.toEvent(user)).thenReturn(userEvent);
         when(refreshTokenService.issue(user)).thenReturn("refresh-token");
         when(jwtTokenProvider.generateToken(user)).thenReturn("access-token");
 
@@ -159,7 +162,7 @@ public class AuthServiceTest {
         verify(appUserRepository).saveAndFlush(saved.capture());
         assertEquals(EMAIL, saved.getValue().getEmail());
         assertEquals(PASSWORD_HASH, saved.getValue().getPasswordHash());
-        verify(outboxEventService).record("user", 1L, "UserCreated", appUserDto);
+        verify(outboxEventService).record("user", 1L, "UserCreated", userEvent);
     }
 
     @Test
