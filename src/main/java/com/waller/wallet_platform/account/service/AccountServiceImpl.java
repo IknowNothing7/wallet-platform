@@ -38,9 +38,9 @@ public class AccountServiceImpl implements AccountService {
     @Override
     @Transactional
     public AccountDto createAnAccount(AccountRequest request) {
-        AppUser user = userRepository.findById(request.getUserId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                        "User " + request.getUserId() + " not found"));
+        // The owner is always the logged-in user, never one named in the request
+        AppUser user = userRepository.findByEmailIgnoreCase(ApiUtils.getCurrentUsername())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
 
         Account account = accountMapper.createAnAccount(request);
         account.setUser(user);

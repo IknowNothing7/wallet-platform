@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.validation.method.ParameterErrors;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.server.ResponseStatusException;
@@ -43,13 +44,21 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.BAD_REQUEST, ApiResponse.error(VALIDATION_FAILED, fieldErrors));
     }
 
-    // @Min/@Max etc. on @RequestParam / @PathVariable
+    // @Min/@Max etc. on @RequestParam / @PathVariable, and @Valid query objects (@ModelAttribute) next to them
     @ExceptionHandler(HandlerMethodValidationException.class)
     public ResponseEntity<ApiResponse<?>> handleParameterValidation(HandlerMethodValidationException e) {
         LinkedHashMap<String, String> parameterErrors = new LinkedHashMap<>();
-        e.getParameterValidationResults().forEach(result -> parameterErrors.putIfAbsent(
-                parameterName(result.getMethodParameter()),
-                result.getResolvableErrors().getFirst().getDefaultMessage()));
+        e.getParameterValidationResults().forEach(result -> {
+            // A query object's errors are keyed by field (e.g. "keyword"), which is the actual query parameter
+            if (result instanceof ParameterErrors errors && errors.hasFieldErrors()) {
+                errors.getFieldErrors()
+                        .forEach(error -> parameterErrors.putIfAbsent(error.getField(), error.getDefaultMessage()));
+            } else {
+                parameterErrors.putIfAbsent(
+                        parameterName(result.getMethodParameter()),
+                        result.getResolvableErrors().getFirst().getDefaultMessage());
+            }
+        });
         return build(HttpStatus.BAD_REQUEST, ApiResponse.error(VALIDATION_FAILED, parameterErrors));
     }
 

@@ -71,8 +71,6 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
                     IDEMPOTENCY_PREFIX + deposit.getId(),
                     new BankPaymentRequest(deposit.getAmount(), deposit.getCurrency(), String.valueOf(deposit.getId())));
         } catch (BankRejectedException e) {
-            // Resubmitting the same request can't succeed, so fail it now instead of letting it expire.
-            // 5xx and timeouts propagate: the outcome is unknown, it stays PENDING and reconciliation resubmits.
             return transactionTemplate.execute(status -> {
                 Deposit locked = lockDeposit(depositId);
                 if (locked.getStatus() == DepositStatus.PENDING) {
@@ -101,7 +99,6 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
         }
         Deposit deposit = depositRepository.findByIdForUpdate(depositId).orElse(null);
         if (deposit == null) {
-            // 2xx anyway: a retry would hit the same missing row. This means money with no deposit.
             depositAlerts.raise(DepositAlerts.Reason.UNKNOWN_DEPOSIT,
                     "Bank result {} for unknown deposit {}", result.reference(), depositId);
             return;
@@ -123,13 +120,14 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
                         "Deposit {} is {} but the bank now reports {}",
                         deposit.getId(), deposit.getStatus(), result.status());
             }
-            // Otherwise a duplicate delivery (bank-sim's DUPLICATE scenario); nothing to do
             return;
         }
 
         switch (result.status()) {
             case SUCCEEDED -> succeed(deposit);
             case FAILED -> fail(deposit, result.failureReason());
+            // Cancelled by expire(); nothing can settle it at the bank any more
+            case CANCELLED -> markExpired(deposit);
             // A webhook is only sent for a final result; reconciliation filters PENDING out before calling
             case PENDING -> log.warn("Ignoring PENDING bank result for deposit {}", deposit.getId());
         }
@@ -144,28 +142,22 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
             return;
         }
 
-        // Ask the bank first so a payment that did settle isn't expired
-        BankPayment payment = findBankPayment(deposit);
+        BankPayment payment = cancelBankPayment(deposit);
         if (payment != null && payment.status() != BankPaymentStatus.PENDING) {
             // Self-invocation skips the proxy, so applyResult needs its own transaction here
             transactionTemplate.executeWithoutResult(status -> applyResult(toResult(payment)));
             return;
         }
 
-        // TODO: Cancel the payment at the bank once bank-sim supports it; a late success now raises STATUS_CONFLICT
         transactionTemplate.executeWithoutResult(status -> {
             Deposit locked = lockDeposit(depositId);
-            // Re-checked under the lock: a webhook may have settled it while we were asking the bank
             if (!isExpirable(locked)) {
                 return;
             }
-            locked.setStatus(DepositStatus.EXPIRED);
-            transitioned(locked, DEPOSIT_EXPIRED);
+            markExpired(locked);
         });
     }
 
-    // The bank holds the money now, so the platform owes it to the user minus the fee:
-    // bank clearing -> user account + fees
     private void succeed(Deposit deposit) {
         Account account = deposit.getAccount();
         Account clearing = systemAccountService.get(SystemAccountKind.BANK_CLEARING, deposit.getCurrency());
@@ -174,7 +166,6 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
         List<PostingRequest> postings = new ArrayList<>();
         postings.add(new PostingRequest(clearing.getId(), PostingDirection.DEBIT, deposit.getAmount(), deposit.getCurrency()));
         postings.add(new PostingRequest(account.getId(), PostingDirection.CREDIT, deposit.getAmount() - fee, deposit.getCurrency()));
-        // Postings must be positive, so small deposits whose fee rounds to 0 get no fee posting
         if (fee > 0) {
             Account fees = systemAccountService.get(SystemAccountKind.FEES, deposit.getCurrency());
             postings.add(new PostingRequest(fees.getId(), PostingDirection.CREDIT, fee, deposit.getCurrency()));
@@ -192,6 +183,12 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
         log.info("Deposit {} succeeded, fee {}, entry {}", deposit.getId(), fee, entry.id());
     }
 
+    private void markExpired(Deposit deposit) {
+        deposit.setStatus(DepositStatus.EXPIRED);
+        transitioned(deposit, DEPOSIT_EXPIRED);
+        log.info("Deposit {} expired", deposit.getId());
+    }
+
     private void fail(Deposit deposit, String reason) {
         deposit.setStatus(DepositStatus.FAILED);
         deposit.setFailureReason(reason);
@@ -199,13 +196,11 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
         log.info("Deposit {} failed: {}", deposit.getId(), reason);
     }
 
-    // failure_reason is VARCHAR(255)
     private static String rejectionReason(BankRejectedException e) {
         String reason = "Rejected by bank (" + e.getStatus().value() + "): " + e.getResponseBody();
         return reason.length() <= 255 ? reason : reason.substring(0, 255);
     }
 
-    // A null reference is allowed: the webhook can arrive before submitToBank has stored it
     private static boolean matches(Deposit deposit, BankPaymentResult result) {
         return deposit.getAmount() == result.amount()
                 && deposit.getCurrency().equals(result.currency())
@@ -218,13 +213,12 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
                 && !deposit.getExpiresAt().isAfter(Instant.now());
     }
 
-    // Null when the bank has no payment for this deposit: never submitted, or it failed before storing it
-    private BankPayment findBankPayment(Deposit deposit) {
+    private BankPayment cancelBankPayment(Deposit deposit) {
         if (deposit.getGatewayReference() == null) {
             return null;
         }
         try {
-            return bankClient.getPayment(deposit.getGatewayReference());
+            return bankClient.cancelPayment(deposit.getGatewayReference());
         } catch (HttpClientErrorException.NotFound e) {
             return null;
         }
@@ -245,6 +239,7 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
         return switch (status) {
             case SUCCEEDED -> DepositStatus.SUCCEEDED;
             case FAILED -> DepositStatus.FAILED;
+            case CANCELLED -> DepositStatus.EXPIRED;
             case PENDING -> DepositStatus.PENDING;
         };
     }
@@ -262,7 +257,6 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, DEPOSIT_NOT_FOUND));
     }
 
-    // Saved and flushed first so the event carries the new updatedAt
     private void transitioned(Deposit deposit, String eventType) {
         DepositDto dto = depositMapper.toDto(depositRepository.saveAndFlush(deposit));
         outboxEventService.record(AGGREGATE_TYPE, deposit.getId(), eventType, dto);

@@ -44,10 +44,12 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/user/create", "/account/create", "/error").permitAll()
+                        .requestMatchers("/user/create", "/error").permitAll()
                         .requestMatchers("/api/auth/**").permitAll()
                         // bank-sim callbacks: authenticated by HMAC signature in BankWebhookController, not JWT
                         .requestMatchers(HttpMethod.POST, "/webhooks/bank").permitAll()
+                        // Public keys for notification-service to verify access tokens
+                        .requestMatchers(HttpMethod.GET, "/.well-known/jwks.json").permitAll()
                         .requestMatchers(
                                 "/swagger-ui/**", "/v3/api-docs/**",
                                 "/actuator/health", "/actuator/info", "/actuator/prometheus"

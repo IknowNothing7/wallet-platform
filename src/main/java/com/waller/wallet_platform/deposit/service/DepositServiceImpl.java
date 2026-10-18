@@ -48,7 +48,9 @@ public class DepositServiceImpl implements DepositService {
     @Override
     @Transactional
     public DepositDto createDeposit(DepositRequest request) {
+        // Someone else's account gets the same 404 as a missing one, so account ids can't be probed
         Account account = accountRepository.findUserAccountById(request.getAccountId())
+                .filter(accountAccessChecker::canAccess)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
                         "Account " + request.getAccountId() + " not found"));
 

@@ -9,7 +9,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class DepositAlerts {
 
-    public enum Reason { UNKNOWN_DEPOSIT, RESULT_MISMATCH, STATUS_CONFLICT }
+    // UNREADABLE_WEBHOOK: a signed bank webhook whose body could not be parsed, stored in bank_webhook_dead_letter
+    public enum Reason { UNKNOWN_DEPOSIT, RESULT_MISMATCH, STATUS_CONFLICT, UNREADABLE_WEBHOOK }
 
     private final MeterRegistry meterRegistry;
 

@@ -80,6 +80,33 @@ class HoldControllerSecurityTest {
         verifyNoInteractions(holdService);
     }
 
+    @Test
+    void noUser_captureHold_is401() throws Exception {
+        mockMvc.perform(post("/hold/10/capture").contentType(MediaType.APPLICATION_JSON).content(CAPTURE_BODY))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false));
+
+        verifyNoInteractions(holdService);
+    }
+
+    @Test
+    void noUser_releaseHold_is401() throws Exception {
+        mockMvc.perform(post("/hold/10/release"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false));
+
+        verifyNoInteractions(holdService);
+    }
+
+    @Test
+    void noUser_expireHold_is401() throws Exception {
+        mockMvc.perform(post("/hold/10/expire"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false));
+
+        verifyNoInteractions(holdService);
+    }
+
     // ---- create: MERCHANT only ----
 
     @Test
@@ -133,6 +160,15 @@ class HoldControllerSecurityTest {
         verifyNoInteractions(holdService);
     }
 
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void admin_captureHold_is403() throws Exception {
+        mockMvc.perform(post("/hold/10/capture").contentType(MediaType.APPLICATION_JSON).content(CAPTURE_BODY))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(holdService);
+    }
+
     // ---- release: MERCHANT only ----
 
     @Test
@@ -149,6 +185,15 @@ class HoldControllerSecurityTest {
     @Test
     @WithMockUser(roles = "USER")
     void user_releaseHold_is403() throws Exception {
+        mockMvc.perform(post("/hold/10/release"))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(holdService);
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void admin_releaseHold_is403() throws Exception {
         mockMvc.perform(post("/hold/10/release"))
                 .andExpect(status().isForbidden());
 
@@ -198,9 +243,6 @@ class HoldControllerSecurityTest {
                 .andExpect(jsonPath("$.payload.id").value(10));
     }
 
-    // TODO: Missing role cases: ADMIN capture/release (both should be 403), and noUser for capture/release/expire.
-    // TODO: No test sends a real JWT through JwtAuthenticationFilter (valid, expired, denylisted token). Cover that
-    //  once in a security test, not per controller.
     @Test
     @WithMockUser(roles = "USER")
     void user_getAccountHolds_reachesService() throws Exception {

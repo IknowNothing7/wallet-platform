@@ -49,6 +49,10 @@ server:
   port: ${SERVER_PORT:8082}
 
 notification:
+  jwks:
+    cache-ttl: PT5M               # how long fetched keys are used before they are refetched
+    min-refresh-interval: PT30S   # an unknown kid refetches at most this often
+
   consumer:
     # Every wallet.<aggregate_type> topic the outbox publishes to, but not the <topic>.DLT dead-letter topics
     topic-pattern: wallet\.[a-z_]+

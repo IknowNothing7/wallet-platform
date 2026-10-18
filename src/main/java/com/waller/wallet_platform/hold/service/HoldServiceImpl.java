@@ -11,6 +11,9 @@ import com.waller.wallet_platform.account.entity.AccountStatus;
 import com.waller.wallet_platform.common.web.PageResponse;
 import com.waller.wallet_platform.account.repository.AccountRepository;
 import com.waller.wallet_platform.security.AccountAccessChecker;
+import com.waller.wallet_platform.common.util.ApiUtils;
+import com.waller.wallet_platform.user.entity.AppUser;
+import com.waller.wallet_platform.user.repository.AppUserRepository;
 import lombok.RequiredArgsConstructor;
 import com.waller.wallet_platform.hold.mapper.HoldMapper;
 import com.waller.wallet_platform.hold.repository.HoldRepository;
@@ -28,6 +31,7 @@ import com.waller.wallet_platform.ledger.service.JournalEntryService;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import static com.waller.wallet_platform.hold.entity.HoldStatus.ACTIVE;
 import static com.waller.wallet_platform.hold.entity.HoldStatus.CAPTURED;
@@ -53,11 +57,15 @@ public class HoldServiceImpl implements HoldService {
     private final OutboxEventService outboxEventService;
     private final JournalEntryService journalEntryService;
     private final JournalEntryRepository journalEntryRepository;
+    private final AppUserRepository userRepository;
 
-    // Merchant-only (enforced in the controller): the account belongs to the customer, not the caller
+    // Merchant-only (enforced in the controller): the account belongs to the customer, not the caller.
+    // The caller is recorded as the hold's merchant, the only one who may capture or release it.
     @Override
     @Transactional
     public HoldDto createHold(HoldRequest request) {
+        AppUser merchant = currentUser()
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
         Account account = accountRepository.findUserAccountByIdForUpdate(request.getAccountId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, ACCOUNT_NOT_FOUND));
 
@@ -75,6 +83,7 @@ public class HoldServiceImpl implements HoldService {
         hold.setAmount(request.getAmount());
         hold.setCurrency(request.getCurrency());
         hold.setExpiresAt(request.getExpiresAt());
+        hold.setMerchant(merchant);
 
         long held = holdRepository.sumAmountByAccountIdAndStatus(account.getId(), ACTIVE, Instant.now());
         if (account.getBalance() - held < hold.getAmount()) {
@@ -90,9 +99,10 @@ public class HoldServiceImpl implements HoldService {
     @Override
     @Transactional(readOnly = true)
     public HoldDto getHold(Long id) {
-        // Someone else's hold looks the same as a missing one, so ids can't be probed
+        // Visible to the account's owner, admins and the merchant who created it. Anyone else's hold looks the
+        // same as a missing one, so ids can't be probed
         Hold hold = holdRepository.findWithAccountById(id)
-                .filter(h -> accountAccessChecker.canAccess(h.getAccount()))
+                .filter(h -> accountAccessChecker.canAccess(h.getAccount()) || isCurrentMerchant(h))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, HOLD_NOT_FOUND));
         return holdMapper.toDto(hold);
     }
@@ -108,12 +118,12 @@ public class HoldServiceImpl implements HoldService {
                 holdMapper::toDto);
     }
 
-    // Merchant-only (enforced in the controller). Moves the held amount to the destination account
-    // through a HOLD_CAPTURE journal entry; a repeat returns the already captured hold.
+    // Only the hold's own merchant. Moves the held amount to the destination account through a HOLD_CAPTURE
+    // journal entry; a repeat returns the already captured hold.
     @Override
     @Transactional
     public HoldDto captureHold(Long id, HoldCaptureRequest request) {
-        Hold hold = lockHold(id);
+        Hold hold = lockOwnHold(id);
         if (hold.getStatus() == CAPTURED) {
             return holdMapper.toDto(hold);
         }
@@ -150,11 +160,11 @@ public class HoldServiceImpl implements HoldService {
         return transitioned(hold, HOLD_CAPTURED);
     }
 
-    // Merchant-only (enforced in the controller): gives the reserved funds back, e.g. on a cancelled order
+    // Only the hold's own merchant: gives the reserved funds back, e.g. on a cancelled order
     @Override
     @Transactional
     public HoldDto releaseHold(Long id) {
-        Hold hold = lockHold(id);
+        Hold hold = lockOwnHold(id);
         if (hold.getStatus() == RELEASED) {
             return holdMapper.toDto(hold);
         }
@@ -186,6 +196,27 @@ public class HoldServiceImpl implements HoldService {
     private Hold lockHold(Long id) {
         return holdRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, HOLD_NOT_FOUND));
+    }
+
+    // Another merchant's hold gets the same 404 as a missing one, even for a repeated transition
+    private Hold lockOwnHold(Long id) {
+        Hold hold = lockHold(id);
+        if (!isCurrentMerchant(hold)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, HOLD_NOT_FOUND);
+        }
+        return hold;
+    }
+
+    // The principal's name is the user's email (see AppUserDetailsService)
+    private Optional<AppUser> currentUser() {
+        return userRepository.findByEmailIgnoreCase(ApiUtils.getCurrentUsername());
+    }
+
+    // Holds created before V10 have no merchant, so nobody matches them
+    private boolean isCurrentMerchant(Hold hold) {
+        return hold.getMerchant() != null && currentUser()
+                .map(user -> user.getId().equals(hold.getMerchant().getId()))
+                .orElse(false);
     }
 
     // Any other final state means the hold went a different way; that is a conflict, not a retry

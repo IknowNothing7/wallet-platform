@@ -11,6 +11,31 @@ groups:
           description: >-
             {{ $value | humanize }} deposit alert(s) with reason {{ $labels.reason }} in the last 5 minutes.
             Search the wallet-platform logs for "ALERT [{{ $labels.reason }}]" for deposit ids and bank references.
+            UNREADABLE_WEBHOOK: the body is in the bank_webhook_dead_letter table, under the id in the log line.
+
+      # Webhooks are not arriving and reconciliation is not clearing the backlog (bank down, or the job stuck)
+      - alert: DepositsStuckPending
+        expr: max(wallet_deposit_stale_pending_oldest_seconds) > 600
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PENDING deposits not settling"
+          description: >-
+            The oldest stale PENDING deposit has been waiting {{ $value | humanizeDuration }}.
+            Check bank-sim reachability and the "Reconciliation of deposit" warnings in the wallet-platform logs.
+
+      # Transfers are not being booked: the processing job is stuck, or transfers keep failing and backing off
+      - alert: TransfersStuckPending
+        expr: max(wallet_transfer_stale_pending_oldest_seconds) > 600
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PENDING transfers not being processed"
+          description: >-
+            The oldest stale PENDING transfer has been waiting {{ $value | humanizeDuration }}.
+            Search the wallet-platform logs for "Processing of transfer" warnings.
 
       - alert: WalletPlatformDown
         expr: up{job="wallet-platform"} == 0

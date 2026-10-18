@@ -21,6 +21,8 @@ public interface TransferMapper {
     @Mapping(target = "toAccount.id", source = "idToAccount")
     @Mapping(target = "journalEntry", ignore = true)
     @Mapping(target = "failureReason", ignore = true)
+    @Mapping(target = "attempts", ignore = true)
+    @Mapping(target = "nextAttemptAt", ignore = true)
     Transfer requestToEntity(TransferRequest request);
 
 }

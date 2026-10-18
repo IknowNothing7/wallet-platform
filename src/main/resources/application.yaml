@@ -58,7 +58,13 @@ bank:
   webhook:
     # Shared with bank-sim (BANK_SIM_WEBHOOK_SECRET there); verifies X-Bank-Signature
     secret: ${BANK_SIM_WEBHOOK_SECRET:change-me-local-only}
+    # Also accepted while rotating: set it to the old secret, switch bank-sim to the new one, then clear it
+    previous-secret: ${BANK_SIM_WEBHOOK_PREVIOUS_SECRET:}
     tolerance: PT5M       # max age of X-Bank-Timestamp, against replays
+    max-body-size: 16KB   # a payment result is a few hundred bytes; larger bodies get 413 before being read
+    rate-limit:
+      max-requests: 600   # per client IP per window; all real webhooks come from bank-sim's one address
+      window: PT1M
 
 deposit:
   pending-ttl: PT30M      # PENDING this long: ask the bank once more, then expire
@@ -70,8 +76,12 @@ deposit:
 transfer:
   processing:
     poll-interval: PT5S
-    pending-for: PT10S    # only pick up transfers this old, so a synchronous process() call isn't raced
+    pending-for: PT0S     # processing is asynchronous (only this job calls process()), so pick transfers up at once
     batch-size: 100
+    stale-after: PT1M     # PENDING this long after creation counts as stale (wallet_transfer_stale_* metrics)
+    max-attempts: 10      # processing exceptions before a transfer is marked FAILED
+    initial-backoff: PT5S # doubles per failed attempt...
+    max-backoff: PT5M     # ...up to this; 10 attempts span about 20 minutes
 
 management:
   endpoints:
@@ -87,5 +97,7 @@ logging:
     org.flywaydb: DEBUG
 
 jwt:
-  secret: "PJiz4ERh9SMC_OKIn8kmYJemWw4Bmiv2zyeadNR3vEOP7mNNTiEDo4fHJLQTPUSSLE_2QL_j2uPTeXQ8uh29dQ"
+  # RS256 signing key, PKCS#8 PEM (or just its base64 body). Unset: a key is generated at startup, so tokens don't
+  # survive a restart. Generate one with: openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048
+  private-key: ${JWT_PRIVATE_KEY:}
   lifetime: 3600000

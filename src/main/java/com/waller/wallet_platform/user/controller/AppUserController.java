@@ -3,6 +3,7 @@ package com.waller.wallet_platform.user.controller;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -17,6 +18,7 @@ import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import com.waller.wallet_platform.user.dto.AppUserDto;
 import com.waller.wallet_platform.user.dto.AppUserRequest;
+import com.waller.wallet_platform.user.dto.UserSearchRequest;
 import com.waller.wallet_platform.user.service.AppUserService;
 
 @RestController
@@ -32,13 +34,14 @@ public class AppUserController {
         return ApiResponse.ok(userService.createUser(request));
     }
 
-    // Exposes every user's email, so admins only
+    // Exposes every user's email, so admins only. Optional filters: username, email, keyword; sortField NAME|EMAIL
     @GetMapping
     @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<PageResponse<AppUserDto>> getUsers(
+            @Valid @ModelAttribute UserSearchRequest search,
             @RequestParam(name = "page", defaultValue = "0") @Min(0) int page,
             @RequestParam(name = "size", defaultValue = "20") @Min(1) @Max(100) int size) {
-        return ApiResponse.ok(userService.getUsers(page, size));
+        return ApiResponse.ok(userService.getUsers(search, page, size));
     }
 
 }

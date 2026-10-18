@@ -10,26 +10,43 @@ import com.waller.notification_service.event.service.WalletEvent;
 @Component
 public class NotificationTemplates {
 
+    private static final NotificationTemplate DEPOSIT_CREATED =
+            new NotificationTemplate("Top-up started", "Top-up of %s is being processed");
+    private static final NotificationTemplate DEPOSIT_SUCCEEDED =
+            new NotificationTemplate("Top-up completed", "Top-up of %s completed");
+    private static final NotificationTemplate DEPOSIT_FAILED =
+            new NotificationTemplate("Top-up failed", "Top-up of %s was declined by the bank");
+    private static final NotificationTemplate DEPOSIT_EXPIRED =
+            new NotificationTemplate("Top-up timed out", "Top-up of %s was not confirmed by the bank in time");
+    private static final NotificationTemplate TRANSFER_SENT =
+            new NotificationTemplate("Money sent", "You sent %s");
+    private static final NotificationTemplate TRANSFER_RECEIVED =
+            new NotificationTemplate("Money received", "You received %s");
+    private static final NotificationTemplate HOLD_CREATED =
+            new NotificationTemplate("Funds reserved", "%s reserved on your account");
+    private static final NotificationTemplate HOLD_CAPTURED =
+            new NotificationTemplate("Payment completed", "%s charged");
+    private static final NotificationTemplate HOLD_RELEASED =
+            new NotificationTemplate("Reservation released", "%s is available again");
+
     public List<NotificationDraft> render(WalletEvent event) {
         JsonNodeFields p = new JsonNodeFields(event.payload());
         return switch (event.eventType()) {
-            case "DepositCreated" -> List.of(new NotificationDraft(
-                    p.longValue("accountId"), "Top-up started", "Top-up of " + money(p) + " is being processed"));
+            case "DepositCreated" -> List.of(DEPOSIT_CREATED.draft(p.longValue("accountId"), money(p)));
+            case "DepositSucceeded" -> List.of(DEPOSIT_SUCCEEDED.draft(p.longValue("accountId"), money(p)));
+            // failureReason is left out on purpose: it can hold the raw bank response
+            case "DepositFailed" -> List.of(DEPOSIT_FAILED.draft(p.longValue("accountId"), money(p)));
+            case "DepositExpired" -> List.of(DEPOSIT_EXPIRED.draft(p.longValue("accountId"), money(p)));
             case "TransferCreated" -> List.of(
-                    new NotificationDraft(p.longValue("fromAccountId"), "Money sent", "You sent " + money(p)),
-                    new NotificationDraft(p.longValue("toAccountId"), "Money received", "You received " + money(p)));
-            case "HoldCreated" -> List.of(new NotificationDraft(
-                    p.longValue("accountId"), "Funds reserved", money(p) + " reserved on your account"));
-            case "HoldCaptured" -> List.of(new NotificationDraft(
-                    p.longValue("accountId"), "Payment completed", money(p) + " charged"));
-            case "HoldReleased", "HoldExpired" -> List.of(new NotificationDraft(
-                    p.longValue("accountId"), "Reservation released", money(p) + " is available again"));
-            // TODO: DepositSucceeded / DepositFailed once wallet-service emits them from the bank webhook
+                    TRANSFER_SENT.draft(p.longValue("fromAccountId"), money(p)),
+                    TRANSFER_RECEIVED.draft(p.longValue("toAccountId"), money(p)));
+            case "HoldCreated" -> List.of(HOLD_CREATED.draft(p.longValue("accountId"), money(p)));
+            case "HoldCaptured" -> List.of(HOLD_CAPTURED.draft(p.longValue("accountId"), money(p)));
+            case "HoldReleased", "HoldExpired" -> List.of(HOLD_RELEASED.draft(p.longValue("accountId"), money(p)));
             default -> List.of();
         };
     }
 
-    // Amounts are in minor units
     private static String money(JsonNodeFields p) {
         return BigDecimal.valueOf(p.longValue("amount"), 2).toPlainString() + " " + p.text("currency");
     }

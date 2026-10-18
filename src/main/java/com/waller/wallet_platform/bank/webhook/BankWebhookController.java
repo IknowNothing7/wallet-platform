@@ -12,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.json.JsonMapper;
 import com.waller.wallet_platform.bank.dto.BankPaymentResult;
+import com.waller.wallet_platform.deposit.service.DepositAlerts;
 import com.waller.wallet_platform.deposit.service.DepositProcessingService;
 
 // Called by bank-sim, not by users: no JWT, authenticated by the HMAC signature instead (permitted in SecurityConfig)
@@ -24,6 +25,8 @@ public class BankWebhookController {
     private final BankWebhookVerifier verifier;
     private final JsonMapper jsonMapper;
     private final DepositProcessingService depositProcessingService;
+    private final BankWebhookDeadLetterRepository deadLetterRepository;
+    private final DepositAlerts depositAlerts;
 
     // Any non-2xx makes bank-sim retry with backoff, so only answer an error when a retry could succeed
     @PostMapping("/bank")
@@ -41,13 +44,16 @@ public class BankWebhookController {
         try {
             result = jsonMapper.readValue(body, BankPaymentResult.class);
         } catch (JacksonException e) {
-            // Signed but unreadable: a contract mismatch. A retry sends the same body, so it would fail forever.
-            // TODO: Store it somewhere (dead-letter table) and alert instead of only logging
-            log.error("Unreadable bank webhook body", e);
+            // Signed but unreadable: a contract mismatch. A retry sends the same body, so it would fail forever:
+            // keep it for manual review and acknowledge. If saving fails the 500 makes bank-sim retry, which is fine.
+            BankWebhookDeadLetter deadLetter = deadLetterRepository.save(
+                    new BankWebhookDeadLetter(String.valueOf(e.getOriginalMessage()), body));
+            depositAlerts.raise(DepositAlerts.Reason.UNREADABLE_WEBHOOK,
+                    "Unreadable bank webhook stored as dead letter {}: {}", deadLetter.getId(), e.getOriginalMessage());
             return;
         }
 
-        // TODO: Rate limit / size limit this endpoint like /api/auth/**; it is public
+        // Rate and size limits are applied before this, in BankWebhookLimitFilter
         depositProcessingService.applyResult(result);
     }
 }

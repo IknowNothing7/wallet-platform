@@ -11,5 +11,8 @@ public interface PaymentService {
 
     PaymentDto getPayment(String reference);
 
+    /** Cancels a PENDING payment. Returns the payment as it now is, so one that already settled comes back as it is. */
+    PaymentDto cancelPayment(String reference);
+
     List<PaymentDto> getPayments();
 }

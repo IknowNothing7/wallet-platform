@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -30,6 +31,7 @@ public class WebhookSender {
 
     private static final String PAYMENT_NOT_FOUND = "Payment not found";
     private static final String PAYMENT_PENDING = "Payment has no result yet";
+    private static final String TOO_MANY_RESENDS = "Too many resends for this payment, try again later";
 
     private final WebhookProperties properties;
     private final WebhookSigner signer;
@@ -38,13 +40,16 @@ public class WebhookSender {
     private final JsonMapper jsonMapper;
     private final RestClient restClient;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
+    private final RateLimiter resendLimiter;
 
     public WebhookSender(
             WebhookProperties properties,
             WebhookSigner signer,
             ScenarioService scenarioService,
             PaymentStore paymentStore,
-            JsonMapper jsonMapper) {
+            JsonMapper jsonMapper,
+            @Value("${bank-sim.webhook.resend.max-requests:5}") int maxResends,
+            @Value("${bank-sim.webhook.resend.window:PT15M}") Duration resendWindow) {
         this.properties = properties;
         this.signer = signer;
         this.scenarioService = scenarioService;
@@ -54,13 +59,18 @@ public class WebhookSender {
         requestFactory.setConnectTimeout(properties.requestTimeout());
         requestFactory.setReadTimeout(properties.requestTimeout());
         this.restClient = RestClient.builder().requestFactory(requestFactory).build();
+        this.resendLimiter = new RateLimiter(maxResends, resendWindow);
+        scheduler.scheduleAtFixedRate(resendLimiter::evictExpired,
+                resendWindow.toMillis(), resendWindow.toMillis(), TimeUnit.MILLISECONDS);
     }
 
-    /** Settles the payment after the configured delay and starts delivering its result. */
     public void scheduleResult(Payment payment, PaymentOutcome outcome) {
         scheduler.schedule(() -> {
-            payment.setStatus(outcome.succeeded() ? PaymentStatus.SUCCEEDED : PaymentStatus.FAILED);
-            payment.setFailureReason(outcome.failureReason());
+            PaymentStatus status = outcome.succeeded() ? PaymentStatus.SUCCEEDED : PaymentStatus.FAILED;
+            if (!payment.settle(status, outcome.failureReason())) {
+                log.info("Not settling payment {}: already {}", payment.getReference(), payment.getStatus());
+                return;
+            }
             WebhookMode mode = scenarioService.get().webhookMode();
             if (mode == WebhookMode.DROP) {
                 log.info("Dropping webhook for payment {} (scenario)", payment.getReference());
@@ -73,12 +83,14 @@ public class WebhookSender {
         }, properties.delay().toMillis(), TimeUnit.MILLISECONDS);
     }
 
-    /** Manual resend from the control API, e.g. after a DROP scenario. */
     public void resend(String reference) {
         Payment payment = paymentStore.findByReference(reference)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, PAYMENT_NOT_FOUND));
         if (payment.getStatus() == PaymentStatus.PENDING) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, PAYMENT_PENDING);
+        }
+        if (!resendLimiter.tryAcquire(reference)) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, TOO_MANY_RESENDS);
         }
         scheduler.execute(() -> deliver(payment, 1));
     }
@@ -101,7 +113,6 @@ public class WebhookSender {
         }
     }
 
-    // Throws on any non-2xx status, which counts as a failed attempt
     private void post(WebhookPayload payload) {
         String body = jsonMapper.writeValueAsString(payload);
         long timestamp = Instant.now().getEpochSecond();

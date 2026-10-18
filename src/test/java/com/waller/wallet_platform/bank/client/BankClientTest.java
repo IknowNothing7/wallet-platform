@@ -38,6 +38,7 @@ class BankClientTest {
     private int status;
     private String body;
     private volatile String receivedIdempotencyKey;
+    private volatile String receivedRequest;
 
     @BeforeEach
     void setUp() throws IOException {
@@ -77,6 +78,18 @@ class BankClientTest {
     }
 
     @Test
+    void cancelPayment_postsToCancelAndReturnsPayment() {
+        status = 200;
+        body = """
+                {"reference":"bsim_1","amount":2500,"currency":"USD","walletDepositId":"7","status":"CANCELLED"}""";
+
+        BankPayment payment = client.cancelPayment("bsim_1");
+
+        assertThat(payment.status()).isEqualTo(BankPaymentStatus.CANCELLED);
+        assertThat(receivedRequest).isEqualTo("POST /payments/bsim_1/cancel");
+    }
+
+    @Test
     void clientError_throwsBankRejectedWithStatusAndBody() {
         status = 400;
         body = "{\"message\":\"currency must be a 3-letter ISO code\"}";
@@ -113,6 +126,7 @@ class BankClientTest {
 
     private void respond(HttpExchange exchange) throws IOException {
         receivedIdempotencyKey = exchange.getRequestHeaders().getFirst("Idempotency-Key");
+        receivedRequest = exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath();
         exchange.getRequestBody().readAllBytes();
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().add("Content-Type", "application/json");

@@ -16,9 +16,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import com.waller.wallet_platform.user.dto.AppUserDto;
 import com.waller.wallet_platform.user.dto.AppUserRequest;
+import com.waller.wallet_platform.user.dto.UserSearchRequest;
 import com.waller.wallet_platform.user.entity.AppUser;
 import com.waller.wallet_platform.user.mapper.AppUserMapper;
 import com.waller.wallet_platform.user.repository.AppUserRepository;
+import com.waller.wallet_platform.user.repository.AppUserSpecifications;
 
 @Service
 @RequiredArgsConstructor
@@ -65,11 +67,22 @@ public class AppUserServiceImpl implements AppUserService {
 
     @Override
     @Transactional(readOnly = true)
-    public PageResponse<AppUserDto> getUsers(int page, int size) {
-        // Sorted by id so pages stay stable between requests
+    public PageResponse<AppUserDto> getUsers(UserSearchRequest search, int page, int size) {
         return PageResponse.of(
-                userRepository.findAll(PageRequest.of(page, size, Sort.by("id"))),
+                userRepository.findAll(AppUserSpecifications.matching(search), PageRequest.of(page, size, sort(search))),
                 userMapper::toDto);
+    }
+
+    // Id last, so users with the same name keep their order and pages stay stable between requests
+    private static Sort sort(UserSearchRequest search) {
+        Sort byId = Sort.by("id");
+        if (search.getSortField() == null) {
+            return byId;
+        }
+        return switch (search.getSortField()) {
+            case NAME -> Sort.by("name").and(byId);
+            case EMAIL -> Sort.by("email").and(byId);
+        };
     }
 
 }

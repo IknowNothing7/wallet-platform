@@ -111,8 +111,175 @@ class UserControllerTest extends IntegrationTest {
                 .statusCode(409);
     }
 
-    // TODO: Missing endpoint tests:
-    //  - GET /user paging (page/size) and @Max(100) on size give 400 with the parameter name.
-    //  - UserSearchRequest / UserSortField are never used in main code; either wire them into GET /user and test
-    //    them, or delete them.
+    @Test
+    void usersArePagedById() {
+        AppUser admin = appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
+        appUserRepository.saveAll(List.of(
+                user("Alice", "alice@email.com", UserRole.USER),
+                user("Bob", "bob@email.com", UserRole.USER)));
+
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(admin))
+                .queryParam("page", 1)
+                .queryParam("size", 2)
+        .when()
+                .get("/user")
+        .then()
+                .statusCode(200)
+                .body("payload.page", equalTo(1))
+                .body("payload.size", equalTo(2))
+                .body("payload.totalElements", equalTo(3))
+                .body("payload.totalPages", equalTo(2))
+                .body("payload.content.email", contains("bob@email.com"));
+    }
+
+    @Test
+    void pageSizeOver100IsBadRequest() {
+        AppUser admin = appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
+
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(admin))
+                .queryParam("size", 101)
+        .when()
+                .get("/user")
+        .then()
+                .statusCode(400)
+                .body("success", equalTo(false))
+                .body("message", equalTo("Validation failed"))
+                .body("payload", hasKey("size"));
+    }
+
+    @Test
+    void usersAreFilteredByUsernameIgnoringCase() {
+        AppUser admin = saveSearchFixture();
+
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(admin))
+                .queryParam("username", "ALI")
+        .when()
+                .get("/user")
+        .then()
+                .statusCode(200)
+                // Default order is by id: Alicia was saved before Alice
+                .body("payload.content.name", contains("Alicia", "Alice"));
+    }
+
+    @Test
+    void usersAreFilteredByEmail() {
+        AppUser admin = saveSearchFixture();
+
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(admin))
+                .queryParam("email", "@shop.com")
+        .when()
+                .get("/user")
+        .then()
+                .statusCode(200)
+                .body("payload.totalElements", equalTo(2))
+                .body("payload.content.email", contains("carol@shop.com", "alicia@shop.com"));
+    }
+
+    // The keyword matches either field; combined filters must all match
+    @Test
+    void keywordMatchesNameOrEmailAndFiltersCombine() {
+        AppUser admin = saveSearchFixture();
+
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(admin))
+                .queryParam("keyword", "carol")
+        .when()
+                .get("/user")
+        .then()
+                .statusCode(200)
+                .body("payload.content.email", contains("carol@shop.com"));
+
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(admin))
+                .queryParam("username", "ali")
+                .queryParam("email", "shop")
+        .when()
+                .get("/user")
+        .then()
+                .statusCode(200)
+                .body("payload.content.name", contains("Alicia"));
+    }
+
+    // "_" and "%" are LIKE wildcards; in a filter they must only match themselves
+    @Test
+    void likeWildcardsInAFilterMatchLiterally() {
+        AppUser admin = saveSearchFixture();
+
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(admin))
+                .queryParam("username", "_")
+        .when()
+                .get("/user")
+        .then()
+                .statusCode(200)
+                .body("payload.content", hasSize(0));
+    }
+
+    @Test
+    void usersAreSortedByChosenField() {
+        AppUser admin = saveSearchFixture();
+
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(admin))
+                .queryParam("sortField", "EMAIL")
+        .when()
+                .get("/user")
+        .then()
+                .statusCode(200)
+                .body("payload.content.email", contains(
+                        "admin@email.com", "alice@email.com", "alicia@shop.com", "bob@email.com", "carol@shop.com"));
+
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(admin))
+                .queryParam("sortField", "NAME")
+        .when()
+                .get("/user")
+        .then()
+                .statusCode(200)
+                .body("payload.content.name", contains("Admin", "Alice", "Alicia", "Bob", "Carol"));
+    }
+
+    @Test
+    void unknownSortFieldIsBadRequest() {
+        AppUser admin = appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
+
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(admin))
+                .queryParam("sortField", "PASSWORD")
+        .when()
+                .get("/user")
+        .then()
+                .statusCode(400)
+                .body("success", equalTo(false));
+    }
+
+    @Test
+    void filterLongerThan100CharactersIsBadRequest() {
+        AppUser admin = appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
+
+        given()
+                .auth().oauth2(jwtTokenProvider.generateToken(admin))
+                .queryParam("keyword", "a".repeat(101))
+        .when()
+                .get("/user")
+        .then()
+                .statusCode(400)
+                .body("success", equalTo(false))
+                .body("payload", hasKey("keyword"));
+    }
+
+    // Saved out of name and email order, so sorting is really exercised. Returns the admin.
+    private AppUser saveSearchFixture() {
+        AppUser admin = appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
+        appUserRepository.saveAll(List.of(
+                user("Carol", "carol@shop.com", UserRole.USER),
+                user("Alicia", "alicia@shop.com", UserRole.MERCHANT),
+                user("Bob", "bob@email.com", UserRole.USER),
+                user("Alice", "alice@email.com", UserRole.USER)));
+        return admin;
+    }
 }

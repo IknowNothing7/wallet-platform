@@ -8,23 +8,30 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.errors.NetworkException;
 import org.apache.kafka.common.errors.RecordTooLargeException;
 import org.apache.kafka.common.errors.TimeoutException;
+import org.apache.kafka.common.header.Headers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.kafka.KafkaException;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.waller.wallet_platform.outbox.repository.OutboxRepository;
 import com.waller.wallet_platform.outbox.entity.OutboxEvent;
 import com.waller.wallet_platform.outbox.entity.OutboxStatus;
+import static com.waller.wallet_platform.support.TestData.outboxEvent;
 
 class OutboxPublisherTest {
 
@@ -32,20 +39,22 @@ class OutboxPublisherTest {
 
     private OutboxRepository repository;
     private KafkaTemplate<String, String> kafkaTemplate;
+    private TransactionTemplate transactionTemplate;
     private OutboxPublisher publisher;
 
-    // TODO: Either restore @SuppressWarnings("unchecked") (mock(KafkaTemplate.class) is an unchecked conversion) or
-    //  delete the commented-out line.
     @BeforeEach
-//    @SuppressWarnings("unchecked")
     void setUp() {
         repository = mock(OutboxRepository.class);
         kafkaTemplate = mock(KafkaTemplate.class);
-        TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
+        transactionTemplate = mock(TransactionTemplate.class);
         when(transactionTemplate.execute(any())).thenAnswer(
                 invocation -> ((TransactionCallback<?>) invocation.getArgument(0)).doInTransaction(null));
-        publisher = new OutboxPublisher(repository, kafkaTemplate, transactionTemplate,
-                "wallet.", 100, MAX_ATTEMPTS, Duration.ofSeconds(1), Duration.ofSeconds(1), Duration.ofMinutes(5));
+        publisher = publisher(Duration.ofSeconds(1), Duration.ofMinutes(5));
+    }
+
+    private OutboxPublisher publisher(Duration initialBackoff, Duration maxBackoff) {
+        return new OutboxPublisher(repository, kafkaTemplate, transactionTemplate,
+                "wallet.", 100, MAX_ATTEMPTS, Duration.ofSeconds(1), initialBackoff, maxBackoff);
     }
 
     @Test
@@ -82,7 +91,6 @@ class OutboxPublisherTest {
         assertThat(second.getStatus()).isEqualTo(OutboxStatus.PENDING);
         verify(kafkaTemplate, times(1)).send(any(ProducerRecord.class));
 
-        // Backing off: the next poll doesn't touch the database
         publisher.publishPending();
         verify(repository, times(1)).lockPendingBatch(anyInt());
     }
@@ -145,27 +153,103 @@ class OutboxPublisherTest {
         verify(kafkaTemplate, never()).send(any(ProducerRecord.class));
     }
 
-    // TODO: Missing publisher cases:
-    //  - After the pause runs out, publishing resumes, and a successful batch resets the backoff
-    //    (use initialBackoff = Duration.ZERO so nothing has to sleep).
-    //  - The backoff stops growing at maxBackoff.
-    //  - An exception that only wraps a RetriableException is still treated as "broker unavailable"
-    //    (the classify() cause chain).
-    //  - lastError is cut to 2000 characters.
-    //  - All five headers are set, not only event-id.
-    // TODO: Nothing covers OutboxEventServiceImpl, OutboxEventController or the native queries in OutboxRepository:
-    //  - Unit tests: retryEvent 404 vs 409; getEvents with and without a status; record() rejects calls outside
-    //    a transaction (Propagation.MANDATORY).
-    //  - Testcontainers: lockPendingBatch returns only PENDING rows, oldest first, and skips rows another
-    //    transaction has locked; resetFailedToPending resets only FAILED rows.
-    //  - Controller: non-admins get 403 on /outbox.
+    @Test
+    void publishingResumesAfterPauseAndSuccessfulBatchResetsBackoff() {
+        publisher = publisher(Duration.ZERO, Duration.ofMinutes(5));
+        OutboxEvent event = event(1L);
+        when(repository.lockPendingBatch(anyInt())).thenReturn(List.of(event));
+        when(kafkaTemplate.send(any(ProducerRecord.class)))
+                .thenReturn(failed(new TimeoutException("no broker")))
+                .thenReturn(failed(new TimeoutException("no broker")))
+                .thenReturn(succeeded());
+
+        publisher.publishPending();
+        publisher.publishPending();
+        assertThat(ReflectionTestUtils.getField(publisher, "consecutiveFailures")).isEqualTo(2);
+
+        publisher.publishPending();
+
+        verify(repository, times(3)).lockPendingBatch(anyInt());
+        assertThat(event.getStatus()).isEqualTo(OutboxStatus.PUBLISHED);
+        assertThat(ReflectionTestUtils.getField(publisher, "consecutiveFailures")).isEqualTo(0);
+    }
+
+    @Test
+    void backoffDoublesAndStopsGrowingAtMaxBackoff() {
+        publisher = publisher(Duration.ofSeconds(1), Duration.ofSeconds(4));
+        when(repository.lockPendingBatch(anyInt())).thenThrow(new IllegalStateException("db down"));
+
+        assertThat(pauseAfterFailedBatch()).isBetween(Duration.ofMillis(900), Duration.ofSeconds(1));
+        assertThat(pauseAfterFailedBatch()).isBetween(Duration.ofMillis(1900), Duration.ofSeconds(2));
+        assertThat(pauseAfterFailedBatch()).isBetween(Duration.ofMillis(3900), Duration.ofSeconds(4));
+        assertThat(pauseAfterFailedBatch()).isBetween(Duration.ofMillis(3900), Duration.ofSeconds(4));
+    }
+
+    @Test
+    void wrappedRetriableExceptionCountsAsBrokerUnavailable() {
+        OutboxEvent first = event(1L);
+        OutboxEvent second = event(2L);
+        when(repository.lockPendingBatch(anyInt())).thenReturn(List.of(first, second));
+        when(kafkaTemplate.send(any(ProducerRecord.class)))
+                .thenReturn(failed(new KafkaException("send failed", new NetworkException("connection lost"))));
+
+        publisher.publishPending();
+
+        assertThat(first.getStatus()).isEqualTo(OutboxStatus.PENDING);
+        assertThat(first.getAttempts()).isZero();
+        assertThat(first.getLastError()).isEqualTo("NetworkException: connection lost");
+        verify(kafkaTemplate, times(1)).send(any(ProducerRecord.class));
+
+        publisher.publishPending();
+        verify(repository, times(1)).lockPendingBatch(anyInt());
+    }
+
+    @Test
+    void lastErrorIsCutTo2000Characters() {
+        OutboxEvent event = event(1L);
+        when(repository.lockPendingBatch(anyInt())).thenReturn(List.of(event));
+        when(kafkaTemplate.send(any(ProducerRecord.class)))
+                .thenReturn(failed(new IllegalStateException("x".repeat(5000))));
+
+        publisher.publishPending();
+
+        assertThat(event.getLastError()).hasSize(2000).startsWith("IllegalStateException: xxx");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void setsAllHeaders() {
+        when(repository.lockPendingBatch(anyInt())).thenReturn(List.of(event(1L)));
+        when(kafkaTemplate.send(any(ProducerRecord.class))).thenReturn(succeeded());
+
+        publisher.publishPending();
+
+        ArgumentCaptor<ProducerRecord<String, String>> captor = ArgumentCaptor.forClass(ProducerRecord.class);
+        verify(kafkaTemplate).send(captor.capture());
+        Headers headers = captor.getValue().headers();
+        assertThat(header(headers, "event-id")).isEqualTo("1");
+        assertThat(header(headers, "event-type")).isEqualTo("transfer.completed");
+        assertThat(header(headers, "aggregate-type")).isEqualTo("transfer");
+        assertThat(header(headers, "aggregate-id")).isEqualTo("42");
+        assertThat(header(headers, "created-at")).isEqualTo("2026-10-09T10:00:00Z");
+        assertThat(headers.toArray()).hasSize(5);
+    }
+
+    private Duration pauseAfterFailedBatch() {
+        ReflectionTestUtils.setField(publisher, "pausedUntil", Instant.MIN);
+        publisher.publishPending();
+        Instant pausedUntil = (Instant) ReflectionTestUtils.getField(publisher, "pausedUntil");
+        return Duration.between(Instant.now(), pausedUntil);
+    }
+
+    private static String header(Headers headers, String name) {
+        return new String(headers.lastHeader(name).value(), StandardCharsets.UTF_8);
+    }
+
     private static OutboxEvent event(Long id) {
-        OutboxEvent event = new OutboxEvent();
+        OutboxEvent event = outboxEvent("transfer", 42L, "transfer.completed");
         event.setId(id);
         event.setCreatedAt(Instant.parse("2026-10-09T10:00:00Z"));
-        event.setAggregateType("transfer");
-        event.setAggregateId(42L);
-        event.setEventType("transfer.completed");
         event.setPayload(JsonNodeFactory.instance.objectNode().put("amount", 100));
         return event;
     }

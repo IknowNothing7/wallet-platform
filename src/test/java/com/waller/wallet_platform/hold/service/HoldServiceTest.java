@@ -11,6 +11,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.waller.wallet_platform.account.entity.Account;
@@ -34,11 +35,17 @@ import com.waller.wallet_platform.ledger.repository.JournalEntryRepository;
 import com.waller.wallet_platform.ledger.service.JournalEntryService;
 import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import com.waller.wallet_platform.security.AccountAccessChecker;
+import com.waller.wallet_platform.user.entity.AppUser;
+import com.waller.wallet_platform.user.repository.AppUserRepository;
+import org.junit.jupiter.api.AfterEach;
+import org.springframework.security.authentication.TestingAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -48,6 +55,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import static com.waller.wallet_platform.support.TestData.hold;
 
 @ExtendWith(MockitoExtension.class)
 public class HoldServiceTest {
@@ -73,9 +81,16 @@ public class HoldServiceTest {
     @Mock
     private JournalEntryRepository journalEntryRepository;
 
+    @Mock
+    private AppUserRepository userRepository;
+
     @InjectMocks
     private HoldServiceImpl holdService;
 
+    private static final String MERCHANT_EMAIL = "merchant@example.com";
+    private static final String OTHER_MERCHANT_EMAIL = "other-merchant@example.com";
+
+    private AppUser merchant;
     private Account account;
     private Account destination;
     private Hold hold;
@@ -95,12 +110,20 @@ public class HoldServiceTest {
         destination.setStatus(AccountStatus.ACTIVE);
         destination.setCurrency("USD");
 
-        hold = new Hold();
+        merchant = new AppUser();
+        merchant.setId(50L);
+        merchant.setEmail(MERCHANT_EMAIL);
+        AppUser otherMerchant = new AppUser();
+        otherMerchant.setId(51L);
+        otherMerchant.setEmail(OTHER_MERCHANT_EMAIL);
+        // Not every test reaches the merchant lookup (e.g. expireHold, getAccountHolds)
+        lenient().when(userRepository.findByEmailIgnoreCase(MERCHANT_EMAIL)).thenReturn(Optional.of(merchant));
+        lenient().when(userRepository.findByEmailIgnoreCase(OTHER_MERCHANT_EMAIL)).thenReturn(Optional.of(otherMerchant));
+        loginAs(MERCHANT_EMAIL);
+
+        hold = hold(account, 100L, "USD", Instant.now().plus(Duration.ofHours(1)));
         hold.setId(10L);
-        hold.setAccount(account);
-        hold.setAmount(100L);
-        hold.setCurrency("USD");
-        hold.setExpiresAt(Instant.now().plus(Duration.ofHours(1)));
+        hold.setMerchant(merchant);
 
         holdDto = HoldDto.builder()
                 .id(10L)
@@ -111,6 +134,16 @@ public class HoldServiceTest {
                 .build();
 
         request = new HoldRequest(1L, 100L, "USD", Instant.now().plus(Duration.ofHours(1)));
+    }
+
+    @AfterEach
+    void clearSecurityContext() {
+        SecurityContextHolder.clearContext();
+    }
+
+    // The principal's name is the user's email (see AppUserDetailsService)
+    private static void loginAs(String email) {
+        SecurityContextHolder.getContext().setAuthentication(new TestingAuthenticationToken(email, null));
     }
 
     @Test
@@ -132,12 +165,23 @@ public class HoldServiceTest {
         assertThat(saved.getCurrency()).isEqualTo("USD");
         assertThat(saved.getExpiresAt()).isEqualTo(request.getExpiresAt());
         assertThat(saved.getStatus()).isEqualTo(HoldStatus.ACTIVE);
+        assertThat(saved.getMerchant()).isSameAs(merchant);
 
         verify(outboxEventService).record("hold", 10L, "HoldCreated", holdDto);
     }
 
-    // TODO: Also verify that sumAmountByAccountIdAndStatus received "now" and not some other Instant. Expired-but-still-
-    //  ACTIVE holds must not count against the balance, and with any(Instant.class) that bug would go unnoticed.
+    @Test
+    void createHold_unknownPrincipal_is401() {
+        loginAs("nobody@example.com");
+
+        assertThatThrownBy(() -> holdService.createHold(request))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED));
+
+        verify(holdRepository, never()).save(any());
+        verifyNoInteractions(outboxEventService);
+    }
+
     @Test
     void createHold_allowsAmountEqualToAvailableBalance() {
         when(accountRepository.findUserAccountByIdForUpdate(1L)).thenReturn(Optional.of(account));
@@ -146,6 +190,24 @@ public class HoldServiceTest {
         when(holdMapper.toDto(hold)).thenReturn(holdDto);
 
         assertThat(holdService.createHold(request)).isEqualTo(holdDto);
+    }
+
+    // Holds past expiresAt are excluded by the query's "now"; any other Instant would count expired holds (or skip
+    // live ones). The service reads the clock with Instant.now(), so "now" is bracketed by the test's own clock reads.
+    @Test
+    void createHold_sumsActiveHoldsAsOfNow() {
+        when(accountRepository.findUserAccountByIdForUpdate(1L)).thenReturn(Optional.of(account));
+        when(holdRepository.sumAmountByAccountIdAndStatus(eq(1L), eq(HoldStatus.ACTIVE), any(Instant.class))).thenReturn(0L);
+        when(holdRepository.save(any(Hold.class))).thenReturn(hold);
+        when(holdMapper.toDto(hold)).thenReturn(holdDto);
+
+        Instant before = Instant.now();
+        holdService.createHold(request);
+        Instant after = Instant.now();
+
+        ArgumentCaptor<Instant> now = ArgumentCaptor.forClass(Instant.class);
+        verify(holdRepository).sumAmountByAccountIdAndStatus(eq(1L), eq(HoldStatus.ACTIVE), now.capture());
+        assertThat(now.getValue()).isBetween(before, after);
     }
 
     @Test
@@ -215,7 +277,17 @@ public class HoldServiceTest {
     }
 
     @Test
+    void getHold_creatingMerchant_canReadIt() {
+        when(holdRepository.findWithAccountById(10L)).thenReturn(Optional.of(hold));
+        when(accountAccessChecker.canAccess(account)).thenReturn(false);
+        when(holdMapper.toDto(hold)).thenReturn(holdDto);
+
+        assertThat(holdService.getHold(10L)).isEqualTo(holdDto);
+    }
+
+    @Test
     void getHold_someoneElsesHold_looksLikeNotFound() {
+        loginAs(OTHER_MERCHANT_EMAIL);
         when(holdRepository.findWithAccountById(10L)).thenReturn(Optional.of(hold));
         when(accountAccessChecker.canAccess(account)).thenReturn(false);
 
@@ -294,7 +366,21 @@ public class HoldServiceTest {
         verify(outboxEventService).record("hold", 10L, "HoldCaptured", holdDto);
     }
 
-    // TODO: Missing: a capture whose destination is a system account (findUserAccountById hides it, so it should be a 404).
+    // findUserAccountById filters out system accounts, so a system destination looks like a missing one
+    @Test
+    void captureHold_toSystemAccount_is404() {
+        when(holdRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(hold));
+        when(accountRepository.findUserAccountById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> holdService.captureHold(10L, new HoldCaptureRequest(99L)))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND))
+                .hasMessageContaining("Account not found");
+
+        assertThat(hold.getStatus()).isEqualTo(HoldStatus.ACTIVE);
+        verifyNoInteractions(journalEntryService, outboxEventService);
+    }
+
     @Test
     void captureHold_alreadyCaptured_isIdempotent() {
         hold.setStatus(HoldStatus.CAPTURED);
@@ -476,9 +562,87 @@ public class HoldServiceTest {
         verifyNoInteractions(outboxEventService);
     }
 
-    // TODO: Missing: releaseHold / expireHold for a hold that doesn't exist (404).
-    // TODO: Missing: the access check on capture/release, if merchants should only touch holds they created
-    //  (currently any MERCHANT may capture any hold).
-    // TODO: The FOR UPDATE locking and the active-hold sum are only mocked here. Add a Testcontainers test where two
-    //  holds race for the last of the balance and only one succeeds.
+    @Test
+    void releaseHold_notFound_is404() {
+        when(holdRepository.findByIdForUpdate(10L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> holdService.releaseHold(10L))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND))
+                .hasMessageContaining("Hold not found");
+
+        verify(holdRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(outboxEventService);
+    }
+
+    @Test
+    void expireHold_notFound_is404() {
+        when(holdRepository.findByIdForUpdate(10L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> holdService.expireHold(10L))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND))
+                .hasMessageContaining("Hold not found");
+
+        verify(holdRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(outboxEventService);
+    }
+
+    // Another merchant's hold answers like a missing one, so hold ids can't be probed
+    @Test
+    void captureHold_anotherMerchantsHold_is404() {
+        loginAs(OTHER_MERCHANT_EMAIL);
+        when(holdRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(hold));
+
+        assertThatThrownBy(() -> holdService.captureHold(10L, new HoldCaptureRequest(2L)))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND))
+                .hasMessageContaining("Hold not found");
+
+        assertThat(hold.getStatus()).isEqualTo(HoldStatus.ACTIVE);
+        verifyNoInteractions(journalEntryService, outboxEventService);
+        verify(accountRepository, never()).findUserAccountById(any());
+    }
+
+    @Test
+    void releaseHold_anotherMerchantsHold_is404() {
+        loginAs(OTHER_MERCHANT_EMAIL);
+        when(holdRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(hold));
+
+        assertThatThrownBy(() -> holdService.releaseHold(10L))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND))
+                .hasMessageContaining("Hold not found");
+
+        assertThat(hold.getStatus()).isEqualTo(HoldStatus.ACTIVE);
+        verify(holdRepository, never()).saveAndFlush(any());
+        verifyNoInteractions(outboxEventService);
+    }
+
+    // Even a repeat of a finished transition must not tell another merchant the hold's state
+    @Test
+    void releaseHold_anotherMerchantsReleasedHold_is404() {
+        loginAs(OTHER_MERCHANT_EMAIL);
+        hold.setStatus(HoldStatus.RELEASED);
+        when(holdRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(hold));
+
+        assertThatThrownBy(() -> holdService.releaseHold(10L))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
+
+        verifyNoInteractions(holdMapper);
+    }
+
+    // Holds created before V10 have no recorded merchant; nobody may capture or release them, they just expire
+    @Test
+    void captureHold_holdWithoutMerchant_is404() {
+        hold.setMerchant(null);
+        when(holdRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(hold));
+
+        assertThatThrownBy(() -> holdService.captureHold(10L, new HoldCaptureRequest(2L)))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
+
+        verifyNoInteractions(journalEntryService, outboxEventService);
+    }
 }

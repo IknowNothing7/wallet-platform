@@ -53,4 +53,12 @@ public class BankClient {
                 .retrieve()
                 .body(BankPayment.class);
     }
+
+    /** Returns the payment as it is after the cancel: CANCELLED, or its result if it had already settled. */
+    public BankPayment cancelPayment(String reference) {
+        return restClient.post()
+                .uri("/payments/{reference}/cancel", reference)
+                .retrieve()
+                .body(BankPayment.class);
+    }
 }

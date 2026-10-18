@@ -1,16 +1,21 @@
 package com.waller.wallet_platform.deposit.service;
 
-import static com.waller.wallet_platform.support.TestData.testDeposit;
+import static com.waller.wallet_platform.support.TestData.deposit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.time.Instant;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,13 +24,18 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 
 import com.waller.wallet_platform.account.service.SystemAccountService;
 import com.waller.wallet_platform.bank.client.BankClient;
 import com.waller.wallet_platform.bank.client.BankRejectedException;
+import com.waller.wallet_platform.bank.dto.BankPayment;
+import com.waller.wallet_platform.bank.dto.BankPaymentResult;
+import com.waller.wallet_platform.bank.dto.BankPaymentStatus;
 import com.waller.wallet_platform.deposit.entity.Deposit;
 import com.waller.wallet_platform.deposit.entity.DepositStatus;
 import com.waller.wallet_platform.deposit.mapper.DepositMapper;
@@ -73,9 +83,10 @@ class DepositProcessingServiceTest {
 
     @BeforeEach
     void setUp() {
-        deposit = testDeposit(null, 2500, "USD", DepositStatus.PENDING, "bank-sim", null);
+        deposit = deposit(null, 2500, "USD", DepositStatus.PENDING, "bank-sim", null);
         deposit.setId(DEPOSIT_ID);
-        when(depositRepository.findById(DEPOSIT_ID)).thenReturn(Optional.of(deposit));
+        // Lenient: applyResult locks by id and never reads it this way
+        lenient().when(depositRepository.findById(DEPOSIT_ID)).thenReturn(Optional.of(deposit));
     }
 
     @Test
@@ -111,7 +122,7 @@ class DepositProcessingServiceTest {
     void submitToBank_rejectedButAlreadySettled_isLeftAlone() {
         stubTransaction();
         // Settled by someone else (e.g. expired) between the first read and the lock
-        Deposit expired = testDeposit(null, 2500, "USD", DepositStatus.EXPIRED, "bank-sim", null);
+        Deposit expired = deposit(null, 2500, "USD", DepositStatus.EXPIRED, "bank-sim", null);
         expired.setId(DEPOSIT_ID);
         when(depositRepository.findByIdForUpdate(DEPOSIT_ID)).thenReturn(Optional.of(expired));
         when(bankClient.createPayment(anyString(), any()))
@@ -135,6 +146,77 @@ class DepositProcessingServiceTest {
         assertThat(deposit.getFailureReason()).isNull();
         verify(depositRepository, never()).saveAndFlush(any());
         verify(outboxEventService, never()).record(anyString(), any(), anyString(), any());
+    }
+
+    @Test
+    void expire_cancelledAtBank_expiresDeposit() {
+        Deposit pending = expiredPendingDeposit();
+        when(bankClient.cancelPayment("bsim_1")).thenReturn(bankPayment(BankPaymentStatus.CANCELLED));
+        when(depositRepository.findByIdForUpdate(DEPOSIT_ID)).thenReturn(Optional.of(pending));
+        stubTransactionWithoutResult();
+
+        service.expire(DEPOSIT_ID);
+
+        assertThat(pending.getStatus()).isEqualTo(DepositStatus.EXPIRED);
+        verify(outboxEventService).record(eq("deposit"), eq(DEPOSIT_ID), eq("DepositExpired"), any());
+    }
+
+    @Test
+    void expire_settledBeforeCancel_appliesBankResult() {
+        Deposit pending = expiredPendingDeposit();
+        when(bankClient.cancelPayment("bsim_1")).thenReturn(bankPayment(BankPaymentStatus.FAILED));
+        when(depositRepository.findByIdForUpdate(DEPOSIT_ID)).thenReturn(Optional.of(pending));
+        stubTransactionWithoutResult();
+
+        service.expire(DEPOSIT_ID);
+
+        assertThat(pending.getStatus()).isEqualTo(DepositStatus.FAILED);
+        verify(outboxEventService).record(eq("deposit"), eq(DEPOSIT_ID), eq("DepositFailed"), any());
+    }
+
+    @Test
+    void expire_unknownAtBank_expiresDeposit() {
+        Deposit pending = expiredPendingDeposit();
+        when(bankClient.cancelPayment("bsim_1")).thenThrow(
+                HttpClientErrorException.create(HttpStatus.NOT_FOUND, "Not Found", null, null, null));
+        when(depositRepository.findByIdForUpdate(DEPOSIT_ID)).thenReturn(Optional.of(pending));
+        stubTransactionWithoutResult();
+
+        service.expire(DEPOSIT_ID);
+
+        assertThat(pending.getStatus()).isEqualTo(DepositStatus.EXPIRED);
+    }
+
+    @Test
+    void applyResult_cancelledForExpiredDeposit_isNotAConflict() {
+        Deposit expired = expiredPendingDeposit();
+        expired.setStatus(DepositStatus.EXPIRED);
+        when(depositRepository.findByIdForUpdate(DEPOSIT_ID)).thenReturn(Optional.of(expired));
+
+        service.applyResult(new BankPaymentResult("bsim_1", String.valueOf(DEPOSIT_ID), BankPaymentStatus.CANCELLED,
+                2500, "USD", "Cancelled by merchant", Instant.now()));
+
+        verifyNoInteractions(depositAlerts);
+        verify(outboxEventService, never()).record(anyString(), any(), anyString(), any());
+    }
+
+    private Deposit expiredPendingDeposit() {
+        deposit.setGatewayReference("bsim_1");
+        deposit.setExpiresAt(Instant.now().minusSeconds(60));
+        return deposit;
+    }
+
+    private static BankPayment bankPayment(BankPaymentStatus status) {
+        String reason = status == BankPaymentStatus.PENDING || status == BankPaymentStatus.SUCCEEDED
+                ? null : "Declined by issuer";
+        return new BankPayment("bsim_1", 2500, "USD", String.valueOf(DEPOSIT_ID), status, reason, Instant.now());
+    }
+
+    private void stubTransactionWithoutResult() {
+        doAnswer(invocation -> {
+            invocation.<Consumer<TransactionStatus>>getArgument(0).accept(null);
+            return null;
+        }).when(transactionTemplate).executeWithoutResult(any());
     }
 
     private void stubTransaction() {

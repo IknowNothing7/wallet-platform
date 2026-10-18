@@ -75,6 +75,14 @@
         "null"
       ],
       "format": "date-time"
+    },
+    "merchantId": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "description": "User id of the merchant who created the hold; null for holds created before it was recorded"
     }
   },
   "additionalProperties": true,

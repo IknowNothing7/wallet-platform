@@ -47,6 +47,7 @@ public class TransferProcessingServiceImpl implements TransferProcessingService 
     private static final String INSUFFICIENT_FUNDS = "Insufficient funds";
     // 2%, rounded down in the user's favour, same as deposits
     private static final long FEE_BASIS_POINTS = 200;
+    private static final int FAILURE_REASON_MAX_LENGTH = 255;
 
     private final TransferRepository transferRepository;
     private final TransferLimitRepository transferLimitRepository;
@@ -57,6 +58,7 @@ public class TransferProcessingServiceImpl implements TransferProcessingService 
     private final JournalEntryRepository journalEntryRepository;
     private final OutboxEventService outboxEventService;
     private final SystemAccountService systemAccountService;
+    private final TransferRetryPolicy retryPolicy;
 
     @Override
     @Transactional
@@ -99,6 +101,26 @@ public class TransferProcessingServiceImpl implements TransferProcessingService 
         transfer.setJournalEntry(journalEntryRepository.getReferenceById(entry.id()));
         log.info("Transfer {} completed, fee {}, entry {}", transfer.getId(), fee, entry.id());
         return transitioned(transfer, TRANSFER_COMPLETED);
+    }
+
+    @Override
+    @Transactional
+    public TransferDto recordFailedAttempt(Long transferId, String error) {
+        Transfer transfer = lockTransfer(transferId);
+        if (transfer.getStatus() != TransferStatus.PENDING) {
+            return transferMapper.toDto(transfer);
+        }
+        int attempts = transfer.getAttempts() + 1;
+        transfer.setAttempts(attempts);
+        if (retryPolicy.exhausted(attempts)) {
+            transfer.setNextAttemptAt(null);
+            log.error("Transfer {} could not be processed in {} attempts, marking FAILED: {}", transferId, attempts, error);
+            return fail(transfer, truncate("Processing failed after " + attempts + " attempts: " + error));
+        }
+        transfer.setNextAttemptAt(retryPolicy.nextAttemptAt(attempts, Instant.now()));
+        log.warn("Processing of transfer {} failed (attempt {}/{}), next try at {}: {}",
+                transferId, attempts, retryPolicy.maxAttempts(), transfer.getNextAttemptAt(), error);
+        return transferMapper.toDto(transferRepository.saveAndFlush(transfer));
     }
 
     // Undoes the whole entry, fee included: recipient + fees -> sender
@@ -193,6 +215,10 @@ public class TransferProcessingServiceImpl implements TransferProcessingService 
             }
         }
         return null;
+    }
+
+    private static String truncate(String reason) {
+        return reason.length() <= FAILURE_REASON_MAX_LENGTH ? reason : reason.substring(0, FAILURE_REASON_MAX_LENGTH);
     }
 
     private TransferDto fail(Transfer transfer, String reason) {
