@@ -1,7 +1,6 @@
 package com.waller.wallet_platform.transfer.service;
 
 import static com.waller.wallet_platform.support.TestData.account;
-import static com.waller.wallet_platform.support.TestData.transfer;
 import static com.waller.wallet_platform.support.TestData.user;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -12,7 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import com.waller.wallet_platform.account.entity.Account;
 import com.waller.wallet_platform.account.repository.AccountRepository;
 import com.waller.wallet_platform.transfer.dto.TransferDto;
-import com.waller.wallet_platform.transfer.entity.Transfer;
+import com.waller.wallet_platform.transfer.dto.TransferRequest;
 import com.waller.wallet_platform.transfer.entity.TransferLimit;
 import com.waller.wallet_platform.transfer.entity.TransferStatus;
 import com.waller.wallet_platform.transfer.repository.TransferLimitRepository;
@@ -92,8 +91,7 @@ class TransferLimitTest extends IntegrationTest {
     }
 
     private TransferDto process(long amount) {
-        Transfer saved = transferRepository.save(transfer(aliceUsd, bobUsd, amount, "USD"));
-        return transferProcessingService.process(saved.getId());
+        return transferProcessingService.book(new TransferRequest(aliceUsd.getId(), bobUsd.getId(), amount, "USD"));
     }
 
     private static TransferLimit currencyLimit(String currency, Long perTransferMax, Long dailyMax) {

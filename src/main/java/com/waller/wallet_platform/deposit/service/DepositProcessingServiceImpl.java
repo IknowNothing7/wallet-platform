@@ -31,7 +31,7 @@ import com.waller.wallet_platform.ledger.dto.PostingRequest;
 import com.waller.wallet_platform.ledger.entity.JournalEntryType;
 import com.waller.wallet_platform.ledger.entity.PostingDirection;
 import com.waller.wallet_platform.ledger.repository.JournalEntryRepository;
-import com.waller.wallet_platform.ledger.service.JournalEntryService;
+import com.waller.wallet_platform.ledger.service.LedgerService;
 import com.waller.wallet_platform.outbox.service.OutboxEventService;
 
 @Service
@@ -51,7 +51,7 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
     private final DepositMapper depositMapper;
     private final BankClient bankClient;
     private final SystemAccountService systemAccountService;
-    private final JournalEntryService journalEntryService;
+    private final LedgerService ledgerService;
     private final JournalEntryRepository journalEntryRepository;
     private final OutboxEventService outboxEventService;
     private final TransactionTemplate transactionTemplate;
@@ -170,7 +170,7 @@ public class DepositProcessingServiceImpl implements DepositProcessingService {
             Account fees = systemAccountService.get(SystemAccountKind.FEES, deposit.getCurrency());
             postings.add(new PostingRequest(fees.getId(), PostingDirection.CREDIT, fee, deposit.getCurrency()));
         }
-        JournalEntryDto entry = journalEntryService.createJournalEntry(new JournalEntryRequest(
+        JournalEntryDto entry = ledgerService.post(new JournalEntryRequest(
                 JournalEntryType.DEPOSIT,
                 "Deposit " + deposit.getId() + " via " + deposit.getGateway(),
                 AGGREGATE_TYPE,

@@ -55,7 +55,6 @@
     "status": {
       "type": "string",
       "enum": [
-        "PENDING",
         "COMPLETED",
         "FAILED",
         "REVERSED"

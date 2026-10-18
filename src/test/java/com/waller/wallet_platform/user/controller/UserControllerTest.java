@@ -1,12 +1,15 @@
 package com.waller.wallet_platform.user.controller;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import com.waller.wallet_platform.security.JwtTokenProvider;
-import com.waller.wallet_platform.user.dto.AppUserRequest;
+import com.waller.wallet_platform.outbox.repository.OutboxRepository;
 import com.waller.wallet_platform.user.entity.AppUser;
 import com.waller.wallet_platform.user.entity.UserRole;
 import com.waller.wallet_platform.user.repository.AppUserRepository;
@@ -14,8 +17,10 @@ import com.waller.wallet_platform.support.IntegrationTest;
 
 import io.restassured.RestAssured;
 import io.restassured.http.ContentType;
+import io.restassured.response.ValidatableResponse;
 
 import static io.restassured.RestAssured.given;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasKey;
@@ -30,6 +35,9 @@ class UserControllerTest extends IntegrationTest {
 
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
+
+    @Autowired
+    private OutboxRepository outboxRepository;
 
     @Test
     void adminGetsAllUsers() {
@@ -71,44 +79,112 @@ class UserControllerTest extends IntegrationTest {
                 .statusCode(401);
     }
 
+    // Gone: users sign up only through /api/auth/register
     @Test
-    void createUserReturnsCreatedWithoutPassword() {
-        AppUserRequest request = AppUserRequest.builder()
-                .name("newUser")
-                .email("newOne@email.com")
-                .password("passsworD!11")
-                .build();
-
+    void oldSignUpEndpointIsNotPublic() {
         given()
                 .contentType(ContentType.JSON)
-                .body(request)
+                .body(Map.of("name", "newUser", "email", "new@email.com", "password", "passsworD!11"))
         .when()
                 .post("/user/create")
         .then()
-                .statusCode(201)
-                .body("success", equalTo(true))
-                .body("payload.name", equalTo("newUser"))
-                .body("payload.email", equalTo("newone@email.com"))
-                .body("payload", not(hasKey("password")))
-                .body("payload", not(hasKey("passwordHash")));
+                .statusCode(401);
+
+        assertThat(appUserRepository.count()).isZero();
     }
 
     @Test
-    void duplicateEmailInDifferentCaseIsConflict() {
-        appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
-        AppUserRequest request = AppUserRequest.builder()
-                .name("Robin")
-                .email("ADMIN@email.com")
-                .password("!Password!11")
-                .build();
+    void adminGrantsMerchant_whichAppliesToTheUsersExistingToken() {
+        AppUser admin = appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
+        AppUser shop = appUserRepository.save(user("Shop", "shop@email.com", UserRole.USER));
+        String shopToken = jwtTokenProvider.generateToken(shop);
 
+        changeRole(admin, shop.getId(), "MERCHANT")
+                .statusCode(200)
+                .body("payload.role", equalTo("MERCHANT"));
+
+        assertThat(appUserRepository.findById(shop.getId()).orElseThrow().getRole()).isEqualTo(UserRole.MERCHANT);
+        assertThat(outboxRepository.findAll()).singleElement().satisfies(event -> {
+            assertThat(event.getEventType()).isEqualTo("UserRoleChanged");
+            assertThat(event.getAggregateId()).isEqualTo(shop.getId());
+            assertThat(event.getPayload().get("role").asText()).isEqualTo("MERCHANT");
+        });
+        // Roles are read per request, so the token issued while still USER now passes hasRole('MERCHANT'): the
+        // request gets as far as looking up the (missing) account instead of 403
         given()
+                .auth().oauth2(shopToken)
                 .contentType(ContentType.JSON)
-                .body(request)
+                .body(Map.of("accountId", 999_999, "amount", 100, "currency", "USD",
+                        "expiresAt", Instant.now().plus(Duration.ofHours(1)).toString()))
         .when()
-                .post("/user/create")
+                .post("/hold/create")
         .then()
-                .statusCode(409);
+                .statusCode(404);
+    }
+
+    @Test
+    void grantingTheSameRoleAgain_changesNothing() {
+        AppUser admin = appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
+        AppUser shop = appUserRepository.save(user("Shop", "shop@email.com", UserRole.MERCHANT));
+
+        changeRole(admin, shop.getId(), "MERCHANT").statusCode(200).body("payload.role", equalTo("MERCHANT"));
+
+        assertThat(outboxRepository.count()).isZero();
+    }
+
+    @Test
+    void merchantCanBeTurnedBackIntoUser() {
+        AppUser admin = appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
+        AppUser shop = appUserRepository.save(user("Shop", "shop@email.com", UserRole.MERCHANT));
+
+        changeRole(admin, shop.getId(), "USER").statusCode(200).body("payload.role", equalTo("USER"));
+    }
+
+    @Test
+    void adminRoleCanNotBeGranted() {
+        AppUser admin = appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
+        AppUser alice = appUserRepository.save(user("Alice", "alice@email.com", UserRole.USER));
+
+        changeRole(admin, alice.getId(), "ADMIN").statusCode(400);
+
+        assertThat(appUserRepository.findById(alice.getId()).orElseThrow().getRole()).isEqualTo(UserRole.USER);
+    }
+
+    @Test
+    void adminCanNotBeDemoted() {
+        AppUser admin = appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
+
+        changeRole(admin, admin.getId(), "USER").statusCode(409);
+
+        assertThat(appUserRepository.findById(admin.getId()).orElseThrow().getRole()).isEqualTo(UserRole.ADMIN);
+    }
+
+    @Test
+    void onlyAdminsChangeRoles() {
+        AppUser merchant = appUserRepository.save(user("Shop", "shop@email.com", UserRole.MERCHANT));
+        AppUser alice = appUserRepository.save(user("Alice", "alice@email.com", UserRole.USER));
+
+        changeRole(merchant, alice.getId(), "MERCHANT").statusCode(403);
+        changeRole(alice, alice.getId(), "MERCHANT").statusCode(403);
+
+        assertThat(appUserRepository.findById(alice.getId()).orElseThrow().getRole()).isEqualTo(UserRole.USER);
+    }
+
+    @Test
+    void unknownUser_returns404() {
+        AppUser admin = appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
+
+        changeRole(admin, 999_999L, "MERCHANT").statusCode(404);
+    }
+
+    private ValidatableResponse changeRole(AppUser caller, Long userId, String role) {
+        return given()
+                .auth().oauth2(jwtTokenProvider.generateToken(caller))
+                .contentType(ContentType.JSON)
+                .body(Map.of("role", role))
+        .when()
+                .put("/user/{id}/role", userId)
+        .then();
     }
 
     @Test

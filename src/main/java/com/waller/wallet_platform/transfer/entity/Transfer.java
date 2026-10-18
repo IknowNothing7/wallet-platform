@@ -49,7 +49,8 @@ public class Transfer {
     @Enumerated(EnumType.STRING)
     @JdbcTypeCode(SqlTypes.NAMED_ENUM)
     @Column(name = "status", nullable = false, columnDefinition = "transfer_status")
-    private TransferStatus status = TransferStatus.PENDING;
+    // Set when the transfer is booked; a transfer is only ever stored as COMPLETED or FAILED (or later REVERSED)
+    private TransferStatus status;
 
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "journal_entry_id")
@@ -57,12 +58,4 @@ public class Transfer {
 
     @Column(name = "failure_reason", length = 255)
     private String failureReason;
-
-    // Failed processing attempts (exceptions, not business rejections); see TransferRetryPolicy
-    @Column(name = "attempts", nullable = false)
-    private int attempts = 0;
-
-    // Null when the transfer is due now
-    @Column(name = "next_attempt_at")
-    private Instant nextAttemptAt;
 }

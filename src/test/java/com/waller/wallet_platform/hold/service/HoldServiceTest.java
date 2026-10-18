@@ -4,6 +4,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -32,7 +33,7 @@ import com.waller.wallet_platform.ledger.entity.JournalEntry;
 import com.waller.wallet_platform.ledger.entity.JournalEntryType;
 import com.waller.wallet_platform.ledger.entity.PostingDirection;
 import com.waller.wallet_platform.ledger.repository.JournalEntryRepository;
-import com.waller.wallet_platform.ledger.service.JournalEntryService;
+import com.waller.wallet_platform.ledger.service.LedgerService;
 import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import com.waller.wallet_platform.security.AccountAccessChecker;
 import com.waller.wallet_platform.user.entity.AppUser;
@@ -45,6 +46,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -76,7 +78,7 @@ public class HoldServiceTest {
     private OutboxEventService outboxEventService;
 
     @Mock
-    private JournalEntryService journalEntryService;
+    private LedgerService ledgerService;
 
     @Mock
     private JournalEntryRepository journalEntryRepository;
@@ -120,6 +122,10 @@ public class HoldServiceTest {
         lenient().when(userRepository.findByEmailIgnoreCase(MERCHANT_EMAIL)).thenReturn(Optional.of(merchant));
         lenient().when(userRepository.findByEmailIgnoreCase(OTHER_MERCHANT_EMAIL)).thenReturn(Optional.of(otherMerchant));
         loginAs(MERCHANT_EMAIL);
+        // The merchant captures into its own account
+        destination.setUser(merchant);
+        // Capture locks the hold's account too; createHold tests stub their own lookups
+        lenient().when(accountRepository.findUserAccountByIdForUpdate(1L)).thenReturn(Optional.of(account));
 
         hold = hold(account, 100L, "USD", Instant.now().plus(Duration.ofHours(1)));
         hold.setId(10L);
@@ -245,6 +251,20 @@ public class HoldServiceTest {
         verifyNoInteractions(holdRepository, outboxEventService);
     }
 
+    // Otherwise a merchant could reserve a customer's money for as long as it likes
+    @Test
+    void createHold_expiresAtBeyondMaxTtl_isBadRequest() {
+        HoldRequest tooLong = new HoldRequest(1L, 100L, "USD", Instant.now().plus(Duration.ofDays(8)));
+        when(accountRepository.findUserAccountByIdForUpdate(1L)).thenReturn(Optional.of(account));
+
+        assertThatThrownBy(() -> holdService.createHold(tooLong))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST))
+                .hasMessageContaining("expiresAt can be at most 168 hours from now");
+
+        verify(holdRepository, never()).save(any());
+    }
+
     @Test
     void createHold_insufficientFunds_throws() {
         when(accountRepository.findUserAccountByIdForUpdate(1L)).thenReturn(Optional.of(account));
@@ -331,8 +351,8 @@ public class HoldServiceTest {
         JournalEntryDto entryDto = JournalEntryDto.builder().id(99L).build();
         JournalEntry entryRef = new JournalEntry();
         when(holdRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(hold));
-        when(accountRepository.findUserAccountById(2L)).thenReturn(Optional.of(destination));
-        when(journalEntryService.createJournalEntry(any(JournalEntryRequest.class))).thenReturn(entryDto);
+        when(accountRepository.findUserAccountByIdForUpdate(2L)).thenReturn(Optional.of(destination));
+        when(ledgerService.post(any(JournalEntryRequest.class))).thenReturn(entryDto);
         when(journalEntryRepository.getReferenceById(99L)).thenReturn(entryRef);
         when(holdRepository.saveAndFlush(hold)).thenReturn(hold);
         when(holdMapper.toDto(hold)).thenReturn(holdDto);
@@ -344,7 +364,7 @@ public class HoldServiceTest {
         assertThat(hold.getCapturedEntry()).isSameAs(entryRef);
 
         ArgumentCaptor<JournalEntryRequest> captor = ArgumentCaptor.forClass(JournalEntryRequest.class);
-        verify(journalEntryService).createJournalEntry(captor.capture());
+        verify(ledgerService).post(captor.capture());
         JournalEntryRequest entry = captor.getValue();
         assertThat(entry.getEntryType()).isEqualTo(JournalEntryType.HOLD_CAPTURE);
         assertThat(entry.getReferenceType()).isEqualTo("hold");
@@ -366,11 +386,11 @@ public class HoldServiceTest {
         verify(outboxEventService).record("hold", 10L, "HoldCaptured", holdDto);
     }
 
-    // findUserAccountById filters out system accounts, so a system destination looks like a missing one
+    // findUserAccountByIdForUpdate filters out system accounts, so a system destination looks like a missing one
     @Test
     void captureHold_toSystemAccount_is404() {
         when(holdRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(hold));
-        when(accountRepository.findUserAccountById(99L)).thenReturn(Optional.empty());
+        when(accountRepository.findUserAccountByIdForUpdate(99L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> holdService.captureHold(10L, new HoldCaptureRequest(99L)))
                 .isInstanceOfSatisfying(ResponseStatusException.class,
@@ -378,7 +398,7 @@ public class HoldServiceTest {
                 .hasMessageContaining("Account not found");
 
         assertThat(hold.getStatus()).isEqualTo(HoldStatus.ACTIVE);
-        verifyNoInteractions(journalEntryService, outboxEventService);
+        verifyNoInteractions(ledgerService, outboxEventService);
     }
 
     @Test
@@ -389,7 +409,7 @@ public class HoldServiceTest {
 
         assertThat(holdService.captureHold(10L, new HoldCaptureRequest(2L))).isEqualTo(holdDto);
 
-        verifyNoInteractions(journalEntryService, outboxEventService);
+        verifyNoInteractions(ledgerService, outboxEventService);
         verify(holdRepository, never()).saveAndFlush(any());
     }
 
@@ -411,7 +431,7 @@ public class HoldServiceTest {
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("Hold is RELEASED and can not be captured");
 
-        verifyNoInteractions(journalEntryService, outboxEventService);
+        verifyNoInteractions(ledgerService, outboxEventService);
     }
 
     @Test
@@ -423,57 +443,95 @@ public class HoldServiceTest {
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("Hold has expired");
 
-        verifyNoInteractions(journalEntryService, outboxEventService);
+        verifyNoInteractions(ledgerService, outboxEventService);
     }
 
     @Test
     void captureHold_destinationNotFound_throws() {
         when(holdRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(hold));
-        when(accountRepository.findUserAccountById(2L)).thenReturn(Optional.empty());
+        when(accountRepository.findUserAccountByIdForUpdate(2L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> holdService.captureHold(10L, new HoldCaptureRequest(2L)))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("Account not found");
 
-        verifyNoInteractions(journalEntryService, outboxEventService);
+        verifyNoInteractions(ledgerService, outboxEventService);
     }
 
     @Test
     void captureHold_toOwnAccount_throws() {
         when(holdRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(hold));
-        when(accountRepository.findUserAccountById(1L)).thenReturn(Optional.of(account));
 
         assertThatThrownBy(() -> holdService.captureHold(10L, new HoldCaptureRequest(1L)))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("Hold can not be captured to its own account");
 
-        verifyNoInteractions(journalEntryService, outboxEventService);
+        verifyNoInteractions(ledgerService, outboxEventService);
     }
 
     @Test
     void captureHold_destinationNotActive_throws() {
         destination.setStatus(AccountStatus.FROZEN);
         when(holdRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(hold));
-        when(accountRepository.findUserAccountById(2L)).thenReturn(Optional.of(destination));
+        when(accountRepository.findUserAccountByIdForUpdate(2L)).thenReturn(Optional.of(destination));
 
         assertThatThrownBy(() -> holdService.captureHold(10L, new HoldCaptureRequest(2L)))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("Destination account is not active");
 
-        verifyNoInteractions(journalEntryService, outboxEventService);
+        verifyNoInteractions(ledgerService, outboxEventService);
     }
 
     @Test
     void captureHold_destinationCurrencyMismatch_throws() {
         destination.setCurrency("EUR");
         when(holdRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(hold));
-        when(accountRepository.findUserAccountById(2L)).thenReturn(Optional.of(destination));
+        when(accountRepository.findUserAccountByIdForUpdate(2L)).thenReturn(Optional.of(destination));
 
         assertThatThrownBy(() -> holdService.captureHold(10L, new HoldCaptureRequest(2L)))
                 .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("Hold currency does not match destination account currency EUR");
 
-        verifyNoInteractions(journalEntryService, outboxEventService);
+        verifyNoInteractions(ledgerService, outboxEventService);
+    }
+
+    // A merchant may only capture into its own account, not route the customer's money to a third party
+    @Test
+    void captureHold_toAnotherUsersAccount_is404AndPostsNothing() {
+        AppUser stranger = new AppUser();
+        stranger.setId(77L);
+        destination.setUser(stranger);
+        when(holdRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(hold));
+        when(accountRepository.findUserAccountByIdForUpdate(2L)).thenReturn(Optional.of(destination));
+
+        assertThatThrownBy(() -> holdService.captureHold(10L, new HoldCaptureRequest(2L)))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND))
+                .hasMessageContaining("Account not found");
+
+        assertThat(hold.getStatus()).isEqualTo(HoldStatus.ACTIVE);
+        verifyNoInteractions(ledgerService, outboxEventService);
+    }
+
+    // Both accounts locked before posting, lower id first, so a capture queues behind a transfer instead of failing
+    @Test
+    void captureHold_locksBothAccountsLowerIdFirst() {
+        Account lowerDestination = new Account();
+        lowerDestination.setId(0L);
+        lowerDestination.setStatus(AccountStatus.ACTIVE);
+        lowerDestination.setCurrency("USD");
+        lowerDestination.setUser(merchant);
+        when(holdRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(hold));
+        when(accountRepository.findUserAccountByIdForUpdate(0L)).thenReturn(Optional.of(lowerDestination));
+        when(ledgerService.post(any(JournalEntryRequest.class))).thenReturn(JournalEntryDto.builder().id(99L).build());
+        when(holdRepository.saveAndFlush(hold)).thenReturn(hold);
+
+        holdService.captureHold(10L, new HoldCaptureRequest(0L));
+
+        InOrder order = inOrder(accountRepository, ledgerService);
+        order.verify(accountRepository).findUserAccountByIdForUpdate(0L);
+        order.verify(accountRepository).findUserAccountByIdForUpdate(1L);
+        order.verify(ledgerService).post(any(JournalEntryRequest.class));
     }
 
     @Test
@@ -600,8 +658,8 @@ public class HoldServiceTest {
                 .hasMessageContaining("Hold not found");
 
         assertThat(hold.getStatus()).isEqualTo(HoldStatus.ACTIVE);
-        verifyNoInteractions(journalEntryService, outboxEventService);
-        verify(accountRepository, never()).findUserAccountById(any());
+        verifyNoInteractions(ledgerService, outboxEventService);
+        verify(accountRepository, never()).findUserAccountByIdForUpdate(2L);
     }
 
     @Test
@@ -643,6 +701,6 @@ public class HoldServiceTest {
                 .isInstanceOfSatisfying(ResponseStatusException.class,
                         e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
 
-        verifyNoInteractions(journalEntryService, outboxEventService);
+        verifyNoInteractions(ledgerService, outboxEventService);
     }
 }

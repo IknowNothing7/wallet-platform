@@ -1,6 +1,7 @@
 package com.waller.wallet_platform.hold.service;
 
 import com.waller.wallet_platform.outbox.service.OutboxEventService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -27,8 +28,9 @@ import com.waller.wallet_platform.ledger.dto.PostingRequest;
 import com.waller.wallet_platform.ledger.entity.JournalEntryType;
 import com.waller.wallet_platform.ledger.entity.PostingDirection;
 import com.waller.wallet_platform.ledger.repository.JournalEntryRepository;
-import com.waller.wallet_platform.ledger.service.JournalEntryService;
+import com.waller.wallet_platform.ledger.service.LedgerService;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -55,9 +57,13 @@ public class HoldServiceImpl implements HoldService {
     private final HoldMapper holdMapper;
     private final AccountAccessChecker accountAccessChecker;
     private final OutboxEventService outboxEventService;
-    private final JournalEntryService journalEntryService;
+    private final LedgerService ledgerService;
     private final JournalEntryRepository journalEntryRepository;
     private final AppUserRepository userRepository;
+
+    // A merchant may reserve a customer's money for at most this long
+    @Value("${hold.max-ttl:P7D}")
+    private Duration maxTtl = Duration.ofDays(7);
 
     // Merchant-only (enforced in the controller): the account belongs to the customer, not the caller.
     // The caller is recorded as the hold's merchant, the only one who may capture or release it.
@@ -76,6 +82,11 @@ public class HoldServiceImpl implements HoldService {
         if (!account.getCurrency().equals(request.getCurrency())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "Hold currency does not match account currency " + account.getCurrency());
+        }
+
+        if (request.getExpiresAt().isAfter(Instant.now().plus(maxTtl))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "expiresAt can be at most " + maxTtl.toHours() + " hours from now");
         }
 
         Hold hold = new Hold();
@@ -118,8 +129,8 @@ public class HoldServiceImpl implements HoldService {
                 holdMapper::toDto);
     }
 
-    // Only the hold's own merchant. Moves the held amount to the destination account through a HOLD_CAPTURE
-    // journal entry; a repeat returns the already captured hold.
+    // Only the hold's own merchant, and only into one of that merchant's own accounts. Moves the held amount there
+    // through a HOLD_CAPTURE journal entry; a repeat returns the already captured hold.
     @Override
     @Transactional
     public HoldDto captureHold(Long id, HoldCaptureRequest request) {
@@ -132,11 +143,20 @@ public class HoldServiceImpl implements HoldService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Hold has expired");
         }
 
-        Account source = hold.getAccount();
-        Account destination = accountRepository.findUserAccountById(request.getDestinationAccountId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, ACCOUNT_NOT_FOUND));
-        if (destination.getId().equals(source.getId())) {
+        Long sourceId = hold.getAccount().getId();
+        Long destinationId = request.getDestinationAccountId();
+        if (destinationId.equals(sourceId)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Hold can not be captured to its own account");
+        }
+        // Both rows locked, lower id first like transfers, so a capture waits for (rather than fails against) a
+        // concurrent transfer or capture on the same accounts, and the two can't deadlock
+        Account first = lockAccount(Math.min(sourceId, destinationId));
+        Account second = lockAccount(Math.max(sourceId, destinationId));
+        Account source = first.getId().equals(sourceId) ? first : second;
+        Account destination = first.getId().equals(sourceId) ? second : first;
+        // Anyone else's account answers like a missing one, so a merchant can't route a capture to a third party
+        if (!destination.getUser().getId().equals(hold.getMerchant().getId())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ACCOUNT_NOT_FOUND);
         }
         if (destination.getStatus() != AccountStatus.ACTIVE) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Destination account is not active");
@@ -146,7 +166,7 @@ public class HoldServiceImpl implements HoldService {
                     "Hold currency does not match destination account currency " + destination.getCurrency());
         }
 
-        JournalEntryDto entry = journalEntryService.createJournalEntry(new JournalEntryRequest(
+        JournalEntryDto entry = ledgerService.post(new JournalEntryRequest(
                 JournalEntryType.HOLD_CAPTURE,
                 "Capture of hold " + hold.getId(),
                 AGGREGATE_TYPE,
@@ -175,7 +195,7 @@ public class HoldServiceImpl implements HoldService {
         return transitioned(hold, HOLD_RELEASED);
     }
 
-    // Only once expiresAt has passed; until then the hold still reserves its funds
+    // Only once expiresAt has passed; until then the hold still reserves its funds. Called by HoldExpiryJob.
     @Override
     @Transactional
     public HoldDto expireHold(Long id) {
@@ -196,6 +216,12 @@ public class HoldServiceImpl implements HoldService {
     private Hold lockHold(Long id) {
         return holdRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, HOLD_NOT_FOUND));
+    }
+
+    // System accounts are filtered out, so they answer like a missing account
+    private Account lockAccount(Long id) {
+        return accountRepository.findUserAccountByIdForUpdate(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, ACCOUNT_NOT_FOUND));
     }
 
     // Another merchant's hold gets the same 404 as a missing one, even for a repeated transition

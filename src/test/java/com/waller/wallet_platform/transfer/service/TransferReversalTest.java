@@ -2,7 +2,6 @@ package com.waller.wallet_platform.transfer.service;
 
 import static com.waller.wallet_platform.support.TestData.account;
 import static com.waller.wallet_platform.support.TestData.hold;
-import static com.waller.wallet_platform.support.TestData.transfer;
 import static com.waller.wallet_platform.support.TestData.user;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -28,7 +27,7 @@ import com.waller.wallet_platform.outbox.entity.OutboxEvent;
 import com.waller.wallet_platform.outbox.repository.OutboxRepository;
 import com.waller.wallet_platform.support.IntegrationTest;
 import com.waller.wallet_platform.transfer.dto.TransferDto;
-import com.waller.wallet_platform.transfer.entity.Transfer;
+import com.waller.wallet_platform.transfer.dto.TransferRequest;
 import com.waller.wallet_platform.transfer.entity.TransferStatus;
 import com.waller.wallet_platform.transfer.repository.TransferRepository;
 import com.waller.wallet_platform.user.entity.AppUser;
@@ -200,8 +199,7 @@ class TransferReversalTest extends IntegrationTest {
     }
 
     private TransferDto process(Account from, Account to, long amount) {
-        Transfer saved = transferRepository.save(transfer(from, to, amount, "USD"));
-        return transferProcessingService.process(saved.getId());
+        return transferProcessingService.book(new TransferRequest(from.getId(), to.getId(), amount, "USD"));
     }
 
     private long balance(Account account) {

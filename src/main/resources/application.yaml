@@ -73,15 +73,18 @@ deposit:
     stale-after: PT1M     # PENDING this long without a webhook: ask the bank
     batch-size: 50
 
-transfer:
-  processing:
-    poll-interval: PT5S
-    pending-for: PT0S     # processing is asynchronous (only this job calls process()), so pick transfers up at once
+hold:
+  max-ttl: P7D            # latest expiresAt a merchant may ask for, counted from creation
+  expiry:
+    poll-interval: PT30S  # how often HoldExpiryJob marks holds past expiresAt as EXPIRED
     batch-size: 100
-    stale-after: PT1M     # PENDING this long after creation counts as stale (wallet_transfer_stale_* metrics)
-    max-attempts: 10      # processing exceptions before a transfer is marked FAILED
-    initial-backoff: PT5S # doubles per failed attempt...
-    max-backoff: PT5M     # ...up to this; 10 attempts span about 20 minutes
+
+admin:
+  # Creates this ADMIN on startup if no user has the email yet; the only way to get an admin. Leave unset to skip.
+  bootstrap:
+    email: ${ADMIN_EMAIL:}
+    password: ${ADMIN_PASSWORD:}
+    name: ${ADMIN_NAME:Admin}
 
 management:
   endpoints:

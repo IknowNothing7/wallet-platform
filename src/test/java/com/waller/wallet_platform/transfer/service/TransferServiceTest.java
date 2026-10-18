@@ -25,10 +25,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.waller.wallet_platform.account.entity.Account;
-import com.waller.wallet_platform.account.repository.AccountRepository;
 import com.waller.wallet_platform.common.idempotency.IdempotencyService;
 import com.waller.wallet_platform.common.web.PageResponse;
-import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import com.waller.wallet_platform.security.AccountAccessChecker;
 import com.waller.wallet_platform.transfer.dto.TransferDto;
 import com.waller.wallet_platform.transfer.dto.TransferRequest;
@@ -50,10 +48,7 @@ class TransferServiceTest {
     private AccountAccessChecker accountAccessChecker;
 
     @Mock
-    private AccountRepository accountRepository;
-
-    @Mock
-    private OutboxEventService outboxEventService;
+    private TransferProcessingService transferProcessingService;
 
     @Mock
     private IdempotencyService idempotencyService;
@@ -72,62 +67,37 @@ class TransferServiceTest {
         request = new TransferRequest(from.getId(), to.getId(), 100L, "USD");
     }
 
+    // Checking the accounts and booking are TransferProcessingService's (TransferProcessingServiceTest)
     @Test
-    void createTransfer_savesTransferBetweenLoadedAccountsAndRecordsOutboxEvent() {
-        Transfer mapped = new Transfer();
-        mapped.setAmount(100L);
-        mapped.setCurrency("USD");
-        Transfer saved = new Transfer();
-        saved.setId(10L);
-        saved.setAmount(100L);
-        saved.setCurrency("USD");
-        TransferDto dto = TransferDto.builder()
-                .id(10L).fromAccountId(1L).toAccountId(2L).amount(100L).currency("USD")
-                .status(TransferStatus.PENDING).build();
-
-        when(accountRepository.findUserAccountById(1L)).thenReturn(Optional.of(from));
+    void createTransfer_booksItAtOnce() {
+        TransferDto dto = TransferDto.builder().id(10L).status(TransferStatus.COMPLETED).build();
         when(accountAccessChecker.canAccess(1L)).thenReturn(true);
-        when(accountRepository.findUserAccountById(2L)).thenReturn(Optional.of(to));
-        when(transferMapper.requestToEntity(request)).thenReturn(mapped);
-        when(transferRepository.saveAndFlush(mapped)).thenReturn(saved);
-        when(transferMapper.toDto(saved)).thenReturn(dto);
+        when(transferProcessingService.book(request)).thenReturn(dto);
 
-        TransferDto result = transferService.createTransfer(request, null);
-
-        assertThat(result).isEqualTo(dto);
-        assertThat(saved.getFromAccount()).isSameAs(from);
-        assertThat(saved.getToAccount()).isSameAs(to);
-        verify(outboxEventService).record("transfer", 10L, "TransferCreated", dto);
+        assertThat(transferService.createTransfer(request, null)).isSameAs(dto);
+        verifyNoInteractions(idempotencyService);
     }
 
     @Test
-    void createTransfer_repeatedIdempotencyKey_returnsStoredTransferAndCreatesNothing() {
-        TransferDto previous = TransferDto.builder().id(10L).status(TransferStatus.PENDING).build();
+    void createTransfer_repeatedIdempotencyKey_returnsStoredTransferAndBooksNothing() {
+        TransferDto previous = TransferDto.builder().id(10L).status(TransferStatus.COMPLETED).build();
         when(idempotencyService.findResponse("key-1", "POST /transfer/create", request, TransferDto.class))
                 .thenReturn(Optional.of(previous));
 
         TransferDto result = transferService.createTransfer(request, "key-1");
 
         assertThat(result).isSameAs(previous);
-        verifyNoInteractions(accountRepository, transferRepository, outboxEventService);
+        verifyNoInteractions(transferProcessingService);
         verify(idempotencyService, never()).save(any(), any(), any(), any(), any());
     }
 
     @Test
     void createTransfer_newIdempotencyKey_storesTheResponse() {
-        Transfer mapped = new Transfer();
-        Transfer saved = new Transfer();
-        saved.setId(10L);
-        TransferDto dto = TransferDto.builder().id(10L).status(TransferStatus.PENDING).build();
-
+        TransferDto dto = TransferDto.builder().id(10L).status(TransferStatus.FAILED).build();
         when(idempotencyService.findResponse("key-1", "POST /transfer/create", request, TransferDto.class))
                 .thenReturn(Optional.empty());
-        when(accountRepository.findUserAccountById(1L)).thenReturn(Optional.of(from));
         when(accountAccessChecker.canAccess(1L)).thenReturn(true);
-        when(accountRepository.findUserAccountById(2L)).thenReturn(Optional.of(to));
-        when(transferMapper.requestToEntity(request)).thenReturn(mapped);
-        when(transferRepository.saveAndFlush(mapped)).thenReturn(saved);
-        when(transferMapper.toDto(saved)).thenReturn(dto);
+        when(transferProcessingService.book(request)).thenReturn(dto);
 
         TransferDto result = transferService.createTransfer(request, "key-1");
 
@@ -136,52 +106,7 @@ class TransferServiceTest {
     }
 
     @Test
-    void createTransfer_unknownSourceAccount_throwsNotFoundAndSavesNothing() {
-        when(accountRepository.findUserAccountById(1L)).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> transferService.createTransfer(request, null))
-                .isInstanceOfSatisfying(ResponseStatusException.class,
-                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND))
-                .hasMessageContaining("Account 1 not found");
-
-        verify(transferRepository, never()).saveAndFlush(any());
-        verifyNoInteractions(outboxEventService);
-    }
-
-    @Test
-    void createTransfer_currencyMismatch_throwsBadRequestAndSavesNothing() {
-        Account eurAccount = account(2L, "EUR");
-        when(accountRepository.findUserAccountById(1L)).thenReturn(Optional.of(from));
-        when(accountAccessChecker.canAccess(1L)).thenReturn(true);
-        when(accountRepository.findUserAccountById(2L)).thenReturn(Optional.of(eurAccount));
-
-        assertThatThrownBy(() -> transferService.createTransfer(request, null))
-                .isInstanceOfSatisfying(ResponseStatusException.class,
-                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST))
-                .hasMessageContaining("EUR");
-
-        verify(transferRepository, never()).saveAndFlush(any());
-        verifyNoInteractions(outboxEventService);
-    }
-
-    @Test
-    void createTransfer_unknownDestinationAccount_throwsNotFoundAndSavesNothing() {
-        when(accountRepository.findUserAccountById(1L)).thenReturn(Optional.of(from));
-        when(accountAccessChecker.canAccess(1L)).thenReturn(true);
-        when(accountRepository.findUserAccountById(2L)).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> transferService.createTransfer(request, null))
-                .isInstanceOfSatisfying(ResponseStatusException.class,
-                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND))
-                .hasMessageContaining("Account 2 not found");
-
-        verify(transferRepository, never()).saveAndFlush(any());
-        verifyNoInteractions(outboxEventService);
-    }
-
-    @Test
     void createTransfer_sourceAccountOfAnotherUser_answersLikeMissingAccount() {
-        when(accountRepository.findUserAccountById(1L)).thenReturn(Optional.of(from));
         when(accountAccessChecker.canAccess(1L)).thenReturn(false);
 
         assertThatThrownBy(() -> transferService.createTransfer(request, null))
@@ -189,39 +114,7 @@ class TransferServiceTest {
                         e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND))
                 .hasMessageContaining("Account 1 not found");
 
-        verify(transferRepository, never()).saveAndFlush(any());
-        verifyNoInteractions(outboxEventService);
-    }
-
-    @Test
-    void createTransfer_requestCurrencyDiffersFromAccounts_throwsBadRequestAndSavesNothing() {
-        TransferRequest eurRequest = new TransferRequest(1L, 2L, 100L, "EUR");
-        when(accountRepository.findUserAccountById(1L)).thenReturn(Optional.of(from));
-        when(accountAccessChecker.canAccess(1L)).thenReturn(true);
-        when(accountRepository.findUserAccountById(2L)).thenReturn(Optional.of(to));
-
-        assertThatThrownBy(() -> transferService.createTransfer(eurRequest, null))
-                .isInstanceOfSatisfying(ResponseStatusException.class,
-                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST))
-                .hasMessageContaining("USD");
-
-        verify(transferRepository, never()).saveAndFlush(any());
-        verifyNoInteractions(outboxEventService);
-    }
-
-    @Test
-    void createTransfer_toSameAccount_throwsBadRequestAndSavesNothing() {
-        TransferRequest selfRequest = new TransferRequest(1L, 1L, 100L, "USD");
-        when(accountRepository.findUserAccountById(1L)).thenReturn(Optional.of(from));
-        when(accountAccessChecker.canAccess(1L)).thenReturn(true);
-
-        assertThatThrownBy(() -> transferService.createTransfer(selfRequest, null))
-                .isInstanceOfSatisfying(ResponseStatusException.class,
-                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST))
-                .hasMessageContaining("same account");
-
-        verify(transferRepository, never()).saveAndFlush(any());
-        verifyNoInteractions(outboxEventService);
+        verifyNoInteractions(transferProcessingService);
     }
 
     @Test

@@ -42,6 +42,14 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
             ON CONFLICT DO NOTHING""", nativeQuery = true)
     int insertSystemAccountIfAbsent(@Param("kind") String kind, @Param("currency") String currency);
 
+    // The ledger's only way to change a balance (LedgerServiceImpl). 0 rows: the account would go negative, which
+    // only system accounts may. Bumps version so a stale managed copy of the row can't be flushed over it.
+    @Modifying(flushAutomatically = true)
+    @Query(value = """
+            UPDATE account SET balance = balance + :delta, version = version + 1, updated_at = CURRENT_TIMESTAMP
+            WHERE id = :id AND (type = 'SYSTEM' OR balance + :delta >= 0)""", nativeQuery = true)
+    int applyBalanceDelta(@Param("id") Long id, @Param("delta") long delta);
+
     Page<Account> findAll(Pageable page);
 
     Optional<Account> findByUser(Long id);

@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.wallet-platform.local/events/UserRoleChanged.v1.schema.json",
+  "title": "UserRoleChanged",
+  "description": "An admin changed a user's role (PUT /user/{id}/role); the payload carries the new one. Only USER and MERCHANT are ever set this way.",
+  "x-event-type": "UserRoleChanged",
+  "x-event-version": 1,
+  "x-topic": "wallet.user",
+  "x-key": "aggregate id, as a decimal string",
+  "type": "object",
+  "required": [
+    "id",
+    "createdAt",
+    "updatedAt",
+    "name",
+    "email",
+    "role"
+  ],
+  "properties": {
+    "id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "name": {
+      "type": "string"
+    },
+    "email": {
+      "type": "string",
+      "format": "email",
+      "description": "PII: consumers must not log it"
+    },
+    "role": {
+      "type": "string",
+      "enum": [
+        "USER",
+        "ADMIN",
+        "MERCHANT"
+      ]
+    }
+  },
+  "additionalProperties": true,
+  "examples": [
+    {
+      "id": 3,
+      "createdAt": "2026-10-11T08:49:42.695Z",
+      "updatedAt": "2026-10-18T10:02:13.120Z",
+      "name": "Ann",
+      "email": "ann@example.com",
+      "role": "MERCHANT"
+    }
+  ]
+}

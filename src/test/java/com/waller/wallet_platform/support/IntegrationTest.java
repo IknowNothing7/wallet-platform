@@ -24,7 +24,7 @@ import io.restassured.RestAssured;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         // Without a broker the publisher would hold outbox row locks while it waits; one poll at startup is harmless
         "outbox.publisher.poll-interval=PT1H",
-        "transfer.processing.poll-interval=PT1H",
+        "hold.expiry.poll-interval=PT1H",
         "deposit.reconciliation.poll-interval=PT1H" })
 public abstract class IntegrationTest {
 
@@ -50,11 +50,13 @@ public abstract class IntegrationTest {
         resetDatabase();
     }
 
+    // shedlock is kept: ShedLock remembers which lock rows exist and only UPDATEs them, so after a TRUNCATE a job
+    // called by a test would find its row gone and skip the run as "locked"
     private void resetDatabase() {
         if (tables == null) {
             tables = jdbcTemplate.queryForList("""
                     SELECT quote_ident(tablename) FROM pg_tables
-                    WHERE schemaname = 'public' AND tablename <> 'flyway_schema_history'""", String.class);
+                    WHERE schemaname = 'public' AND tablename NOT IN ('flyway_schema_history', 'shedlock')""", String.class);
         }
         jdbcTemplate.execute("TRUNCATE " + String.join(", ", tables) + " RESTART IDENTITY CASCADE");
         // Seed rows from the migrations; keep in sync with V5__transfer_limit.sql

@@ -7,6 +7,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -18,7 +20,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Captor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -37,9 +41,10 @@ import com.waller.wallet_platform.ledger.dto.PostingRequest;
 import com.waller.wallet_platform.ledger.entity.JournalEntryType;
 import com.waller.wallet_platform.ledger.entity.PostingDirection;
 import com.waller.wallet_platform.ledger.repository.JournalEntryRepository;
-import com.waller.wallet_platform.ledger.service.JournalEntryService;
+import com.waller.wallet_platform.ledger.service.LedgerService;
 import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import com.waller.wallet_platform.transfer.dto.TransferDto;
+import com.waller.wallet_platform.transfer.dto.TransferRequest;
 import com.waller.wallet_platform.transfer.entity.Transfer;
 import com.waller.wallet_platform.transfer.entity.TransferStatus;
 import com.waller.wallet_platform.transfer.mapper.TransferMapper;
@@ -65,7 +70,7 @@ class TransferProcessingServiceTest {
     private HoldRepository holdRepository;
 
     @Mock
-    private JournalEntryService journalEntryService;
+    private LedgerService ledgerService;
 
     @Mock
     private JournalEntryRepository journalEntryRepository;
@@ -75,9 +80,6 @@ class TransferProcessingServiceTest {
 
     @Mock
     private SystemAccountService systemAccountService;
-
-    @Mock
-    private TransferRetryPolicy retryPolicy;
 
     @InjectMocks
     private TransferProcessingServiceImpl transferProcessingService;
@@ -98,13 +100,12 @@ class TransferProcessingServiceTest {
     }
 
     @Test
-    void process_takesTwoPercentFeeFromWhatTheRecipientGets() {
-        Transfer transfer = completable(1_000);
+    void book_takesTwoPercentFeeFromWhatTheRecipientGets() {
+        stubBookable();
         when(holdRepository.sumAmountByAccountIdAndStatus(eq(1L), eq(HoldStatus.ACTIVE), any())).thenReturn(0L);
         when(systemAccountService.get(SystemAccountKind.FEES, "USD")).thenReturn(fees);
-        stubJournalEntryAndSave(transfer);
 
-        TransferDto result = transferProcessingService.process(10L);
+        TransferDto result = transferProcessingService.book(request(1_000));
 
         assertThat(result.status()).isEqualTo(TransferStatus.COMPLETED);
         JournalEntryRequest entry = entryCaptor.getValue();
@@ -121,14 +122,13 @@ class TransferProcessingServiceTest {
     }
 
     @Test
-    void process_feeRoundsDownInTheUsersFavour() {
+    void book_feeRoundsDownInTheUsersFavour() {
         // 2% of 149 is 2.98
-        Transfer transfer = completable(149);
+        stubBookable();
         when(holdRepository.sumAmountByAccountIdAndStatus(eq(1L), eq(HoldStatus.ACTIVE), any())).thenReturn(0L);
         when(systemAccountService.get(SystemAccountKind.FEES, "USD")).thenReturn(fees);
-        stubJournalEntryAndSave(transfer);
 
-        transferProcessingService.process(10L);
+        transferProcessingService.book(request(149));
 
         assertThat(entryCaptor.getValue().getPostings())
                 .extracting(PostingRequest::getAccountId, PostingRequest::getAmount)
@@ -136,13 +136,12 @@ class TransferProcessingServiceTest {
     }
 
     @Test
-    void process_feeRoundingToZero_getsNoFeePosting() {
+    void book_feeRoundingToZero_getsNoFeePosting() {
         // 2% of 49 is 0.98
-        Transfer transfer = completable(49);
+        stubBookable();
         when(holdRepository.sumAmountByAccountIdAndStatus(eq(1L), eq(HoldStatus.ACTIVE), any())).thenReturn(0L);
-        stubJournalEntryAndSave(transfer);
 
-        transferProcessingService.process(10L);
+        transferProcessingService.book(request(49));
 
         assertThat(entryCaptor.getValue().getPostings())
                 .extracting(PostingRequest::getAccountId, PostingRequest::getDirection, PostingRequest::getAmount)
@@ -150,6 +149,71 @@ class TransferProcessingServiceTest {
                         tuple(1L, PostingDirection.DEBIT, 49L),
                         tuple(2L, PostingDirection.CREDIT, 49L));
         verifyNoInteractions(systemAccountService);
+    }
+
+    @Test
+    void book_insufficientFunds_storesFailedAndBooksNothing() {
+        stubBookable();
+        when(holdRepository.sumAmountByAccountIdAndStatus(eq(1L), eq(HoldStatus.ACTIVE), any())).thenReturn(0L);
+
+        TransferDto result = transferProcessingService.book(request(10_001));
+
+        assertThat(result.status()).isEqualTo(TransferStatus.FAILED);
+        assertThat(result.failureReason()).isEqualTo("Insufficient funds");
+        verify(outboxEventService).record("transfer", 10L, "TransferFailed", result);
+        verifyNoInteractions(ledgerService);
+    }
+
+    @Test
+    void book_activeHoldsOnSender_countAgainstTheBalance() {
+        stubBookable();
+        when(holdRepository.sumAmountByAccountIdAndStatus(eq(1L), eq(HoldStatus.ACTIVE), any())).thenReturn(9_001L);
+
+        assertThat(transferProcessingService.book(request(1_000)).status()).isEqualTo(TransferStatus.FAILED);
+        verifyNoInteractions(ledgerService);
+    }
+
+    @Test
+    void book_locksTheLowerAccountIdFirst_whicheverWayTheMoneyGoes() {
+        stubBookable();
+        to.setBalance(5_000L);
+        when(systemAccountService.get(SystemAccountKind.FEES, "USD")).thenReturn(fees);
+
+        transferProcessingService.book(new TransferRequest(2L, 1L, 1_000L, "USD"));
+
+        InOrder locks = inOrder(accountRepository);
+        locks.verify(accountRepository).findUserAccountByIdForUpdate(1L);
+        locks.verify(accountRepository).findUserAccountByIdForUpdate(2L);
+    }
+
+    @Test
+    void book_sameAccount_throwsBadRequestAndLocksNothing() {
+        assertThatThrownBy(() -> transferProcessingService.book(new TransferRequest(1L, 1L, 100L, "USD")))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
+        verifyNoInteractions(accountRepository, transferRepository, ledgerService);
+    }
+
+    @Test
+    void book_currencyOfAnotherAccount_throwsBadRequestAndStoresNothing() {
+        when(accountRepository.findUserAccountByIdForUpdate(1L)).thenReturn(Optional.of(from));
+        when(accountRepository.findUserAccountByIdForUpdate(2L)).thenReturn(Optional.of(account(2L, "EUR")));
+
+        assertThatThrownBy(() -> transferProcessingService.book(request(100)))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
+        verifyNoInteractions(transferRepository, ledgerService, outboxEventService);
+    }
+
+    @Test
+    void book_unknownAccount_throwsNotFoundAndStoresNothing() {
+        when(accountRepository.findUserAccountByIdForUpdate(1L)).thenReturn(Optional.of(from));
+        when(accountRepository.findUserAccountByIdForUpdate(2L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> transferProcessingService.book(request(100)))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
+        verifyNoInteractions(transferRepository, ledgerService, outboxEventService);
     }
 
     @Test
@@ -207,7 +271,7 @@ class TransferProcessingServiceTest {
                 .hasMessageContaining("no longer has the funds");
 
         assertThat(transfer.getStatus()).isEqualTo(TransferStatus.COMPLETED);
-        verifyNoInteractions(journalEntryService, outboxEventService);
+        verifyNoInteractions(ledgerService, outboxEventService);
         verify(transferRepository, never()).saveAndFlush(any());
     }
 
@@ -222,7 +286,7 @@ class TransferProcessingServiceTest {
                         e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
 
         assertThat(transfer.getStatus()).isEqualTo(TransferStatus.COMPLETED);
-        verifyNoInteractions(journalEntryService, outboxEventService);
+        verifyNoInteractions(ledgerService, outboxEventService);
     }
 
     @Test
@@ -236,12 +300,7 @@ class TransferProcessingServiceTest {
 
         assertThat(transferProcessingService.reverse(10L, "again")).isSameAs(dto);
 
-        verifyNoInteractions(accountRepository, journalEntryService, outboxEventService);
-    }
-
-    @Test
-    void reverse_pendingTransfer_throwsConflict() {
-        assertReverseRefused(TransferStatus.PENDING);
+        verifyNoInteractions(accountRepository, ledgerService, outboxEventService);
     }
 
     @Test
@@ -270,33 +329,44 @@ class TransferProcessingServiceTest {
                 .hasMessageContaining("Transfer is " + status + " and can not be reversed");
 
         assertThat(transfer.getStatus()).isEqualTo(status);
-        verifyNoInteractions(accountRepository, journalEntryService, outboxEventService);
+        verifyNoInteractions(accountRepository, ledgerService, outboxEventService);
     }
 
-    // A PENDING transfer whose accounts are locked; no limit row applies (the mock returns empty Optionals)
-    private Transfer completable(long amount) {
+    private static TransferRequest request(long amount) {
+        return new TransferRequest(1L, 2L, amount, "USD");
+    }
+
+    // Both accounts lockable, no limit row applies (the mock returns empty Optionals); the first save gives the new
+    // transfer id 10, and the dto mirrors the transfer at save time, so the result shows its final state
+    private void stubBookable() {
+        when(accountRepository.findUserAccountByIdForUpdate(1L)).thenReturn(Optional.of(from));
+        when(accountRepository.findUserAccountByIdForUpdate(2L)).thenReturn(Optional.of(to));
+        when(transferRepository.saveAndFlush(ArgumentMatchers.<Transfer>any())).thenAnswer(invocation -> {
+            Transfer transfer = invocation.getArgument(0);
+            transfer.setId(10L);
+            return transfer;
+        });
+        when(transferMapper.toDto(any(Transfer.class))).thenAnswer(invocation -> {
+            Transfer transfer = invocation.getArgument(0);
+            return TransferDto.builder().id(transfer.getId()).amount(transfer.getAmount())
+                    .status(transfer.getStatus()).failureReason(transfer.getFailureReason()).build();
+        });
+        lenient().when(ledgerService.post(entryCaptor.capture())).thenReturn(JournalEntryDto.builder().id(50L).build());
+    }
+
+    // A COMPLETED transfer whose accounts are locked
+    private Transfer completed(long amount) {
         Transfer transfer = transfer(from, to, amount, "USD");
         transfer.setId(10L);
-        stubLocks(transfer);
-        return transfer;
-    }
-
-    private Transfer completed(long amount) {
-        Transfer transfer = completable(amount);
-        transfer.setStatus(TransferStatus.COMPLETED);
-        return transfer;
-    }
-
-    private void stubLocks(Transfer transfer) {
         when(transferRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(transfer));
         when(accountRepository.findUserAccountByIdForUpdate(1L)).thenReturn(Optional.of(from));
         when(accountRepository.findUserAccountByIdForUpdate(2L)).thenReturn(Optional.of(to));
+        return transfer;
     }
 
     // The dto mirrors the transfer's status at save time, so the result shows the transition
     private void stubJournalEntryAndSave(Transfer transfer) {
-        when(journalEntryService.createJournalEntry(entryCaptor.capture()))
-                .thenReturn(JournalEntryDto.builder().id(50L).build());
+        when(ledgerService.post(entryCaptor.capture())).thenReturn(JournalEntryDto.builder().id(50L).build());
         when(transferRepository.saveAndFlush(transfer)).thenReturn(transfer);
         when(transferMapper.toDto(transfer)).thenAnswer(invocation -> TransferDto.builder()
                 .id(transfer.getId()).amount(transfer.getAmount()).status(transfer.getStatus()).build());

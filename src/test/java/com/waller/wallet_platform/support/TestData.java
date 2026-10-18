@@ -9,6 +9,7 @@ import com.waller.wallet_platform.deposit.entity.DepositStatus;
 import com.waller.wallet_platform.hold.entity.Hold;
 import com.waller.wallet_platform.outbox.entity.OutboxEvent;
 import com.waller.wallet_platform.transfer.entity.Transfer;
+import com.waller.wallet_platform.transfer.entity.TransferStatus;
 import com.waller.wallet_platform.user.entity.AppUser;
 import com.waller.wallet_platform.user.entity.UserRole;
 
@@ -52,8 +53,10 @@ public final class TestData {
         return deposit;
     }
 
+    // COMPLETED as a row only: no journal entry and no balance change. Book real ones through TransferService.
     public static Transfer transfer(Account from, Account to, long amount, String currency) {
         Transfer transfer = new Transfer();
+        transfer.setStatus(TransferStatus.COMPLETED);
         transfer.setFromAccount(from);
         transfer.setToAccount(to);
         transfer.setAmount(amount);

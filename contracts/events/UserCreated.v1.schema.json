@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://contracts.wallet-platform.local/events/UserCreated.v1.schema.json",
   "title": "UserCreated",
-  "description": "A user registered or was created by an admin.",
+  "description": "A user registered, or the admin was created by the startup bootstrap.",
   "x-event-type": "UserCreated",
   "x-event-version": 1,
   "x-topic": "wallet.user",

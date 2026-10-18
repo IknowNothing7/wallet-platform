@@ -127,7 +127,7 @@ public class AuthServiceImpl implements AuthService {
         }
         log.info("User {} registered", saved.getId());
 
-        // Same event as an admin-created user; the DTO keeps the password hash out of it
+        // Same event as a bootstrapped admin; the DTO keeps the password hash out of it
         outboxEventService.record(AGGREGATE_TYPE, saved.getId(), USER_CREATED, userMapper.toDto(saved));
 
         return ApiResponse.ok(buildResponse(saved, refreshTokenService.issue(saved)));

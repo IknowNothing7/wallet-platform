@@ -2,43 +2,29 @@ package com.waller.wallet_platform.ledger.controller;
 
 import java.util.ArrayList;
 
-import com.waller.wallet_platform.common.util.ApiUtils;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import com.waller.wallet_platform.common.web.ApiResponse;
 import com.waller.wallet_platform.common.web.PageResponse;
-import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import com.waller.wallet_platform.ledger.dto.JournalEntryDto;
-import com.waller.wallet_platform.ledger.dto.JournalEntryRequest;
 import com.waller.wallet_platform.ledger.service.JournalEntryService;
 
+// Read-only on purpose: nothing over HTTP may write to the ledger, not even an admin. Money moves only as a step of a
+// transfer, deposit or hold capture (LedgerService).
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/journal-entry")
 @PreAuthorize("hasRole('ADMIN')")
-@Slf4j
 public class JournalEntryController {
 
     private final JournalEntryService journalEntryService;
-
-    @PostMapping("/create")
-    @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<JournalEntryDto> createJournalEntry(@Valid @RequestBody JournalEntryRequest request) {
-        log.info("Endpoint {}", ApiUtils.getMethodName());
-        return ApiResponse.ok(journalEntryService.createJournalEntry(request));
-    }
 
     @GetMapping("/{id}")
     public ApiResponse<JournalEntryDto> getJournalEntry(@PathVariable("id") Long id) {

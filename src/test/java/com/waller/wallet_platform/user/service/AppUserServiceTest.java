@@ -1,18 +1,19 @@
 package com.waller.wallet_platform.user.service;
 
 import java.util.List;
+import java.util.Optional;
 
 import com.waller.wallet_platform.common.util.PasswordUtils;
 import com.waller.wallet_platform.common.web.PageResponse;
 import com.waller.wallet_platform.outbox.service.OutboxEventService;
 import com.waller.wallet_platform.user.dto.AppUserDto;
-import com.waller.wallet_platform.user.dto.AppUserRequest;
 import com.waller.wallet_platform.user.dto.UserSearchRequest;
 import com.waller.wallet_platform.user.dto.UserSortField;
 import com.waller.wallet_platform.user.entity.AppUser;
 import com.waller.wallet_platform.user.entity.UserRole;
 import com.waller.wallet_platform.user.mapper.AppUserMapper;
 import com.waller.wallet_platform.user.repository.AppUserRepository;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -21,19 +22,19 @@ import org.mockito.ArgumentMatchers;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.authentication.TestingAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.server.ResponseStatusException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -62,7 +63,6 @@ public class AppUserServiceTest {
 
     private AppUser testUser;
     private AppUserDto testUserDto;
-    private AppUserRequest request;
 
     @BeforeEach
     void setUp() {
@@ -79,77 +79,85 @@ public class AppUserServiceTest {
                 .role(UserRole.USER)
                 .email("test@email.com")
                 .build();
+    }
 
-        // Mixed case so the service's email normalization is really tested
-        request = AppUserRequest.builder()
-                .name("TestUser")
-                .email("Test@Email.com")
-                .password("testPassword!2")
-                .build();
+    @AfterEach
+    void clearSecurityContext() {
+        SecurityContextHolder.clearContext();
     }
 
     @Test
-    void createUserTest() {
-        AppUser mapped = new AppUser();
-        mapped.setName("TestUser");
-        when(mapper.requestToEntity(request)).thenReturn(mapped);
-        when(passwordEncoder.encode(request.getPassword())).thenReturn("encoded-password-hash");
-        when(repository.saveAndFlush(mapped)).thenReturn(testUser);
-        when(mapper.toDto(testUser)).thenReturn(testUserDto);
+    void bootstrapAdmin_createsAdminWithNormalizedEmailAndHashedPassword() {
+        when(repository.findByEmailIgnoreCase("root@email.com")).thenReturn(Optional.empty());
+        when(passwordEncoder.encode("Str0ng!Password")).thenReturn("encoded-password-hash");
+        when(repository.saveAndFlush(any(AppUser.class))).thenAnswer(inv -> inv.getArgument(0));
+        AppUserDto adminDto = AppUserDto.builder().id(7L).role(UserRole.ADMIN).build();
+        when(mapper.toDto(any(AppUser.class))).thenReturn(adminDto);
 
-        AppUserDto result = service.createUser(request);
+        assertThat(service.bootstrapAdmin("Root", "Root@Email.com", "Str0ng!Password")).isSameAs(adminDto);
 
-        assertEquals(testUserDto, result);
-
-        // The service, not the mapper, sets these, so check what was actually saved
         ArgumentCaptor<AppUser> saved = ArgumentCaptor.forClass(AppUser.class);
-        verify(repository, times(1)).saveAndFlush(saved.capture());
-        assertEquals("test@email.com", saved.getValue().getEmail());
-        assertEquals("encoded-password-hash", saved.getValue().getPasswordHash());
-
-        verify(outboxEventService).record("user", 1L, "UserCreated", testUserDto);
+        verify(repository).saveAndFlush(saved.capture());
+        assertThat(saved.getValue().getEmail()).isEqualTo("root@email.com");
+        assertThat(saved.getValue().getPasswordHash()).isEqualTo("encoded-password-hash");
+        assertThat(saved.getValue().getRole()).isEqualTo(UserRole.ADMIN);
+        verify(outboxEventService).record("user", 7L, "UserCreated", adminDto);
     }
 
     @Test
-    void ifUserEmailExistThenThrowException() {
-        when(repository.existsByEmailIgnoreCase("test@email.com")).thenReturn(true);
+    void bootstrapAdmin_adminAlreadyThere_createsNothing() {
+        testUser.setRole(UserRole.ADMIN);
+        when(repository.findByEmailIgnoreCase("test@email.com")).thenReturn(Optional.of(testUser));
 
-        assertThatThrownBy(() -> service.createUser(request)).isInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining("Email is already registered")
-                .hasFieldOrPropertyWithValue("statusCode", HttpStatus.CONFLICT);
+        assertThat(service.bootstrapAdmin("Root", "test@email.com", "Str0ng!Password")).isNull();
 
         verify(repository, never()).saveAndFlush(any());
         verifyNoInteractions(outboxEventService);
     }
 
+    // Whoever registered the email first must not become admin
     @Test
-    void ifPasswordIsNotValidThenThrowException() {
-        AppUserRequest badRequest = AppUserRequest.builder()
-                .name("TestUser")
-                .email("test@email.com")
-                .password("short")
-                .build();
+    void bootstrapAdmin_emailTakenByRegularUser_neverPromotesThem() {
+        when(repository.findByEmailIgnoreCase("test@email.com")).thenReturn(Optional.of(testUser));
 
-        assertThatThrownBy(() -> service.createUser(badRequest))
-                .isInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining(PasswordUtils.INVALID_PASSWORD_MESSAGE);
+        assertThat(service.bootstrapAdmin("Root", "test@email.com", "Str0ng!Password")).isNull();
 
-        verifyNoInteractions(repository, mapper, passwordEncoder, outboxEventService);
+        assertThat(testUser.getRole()).isEqualTo(UserRole.USER);
+        verify(repository, never()).saveAndFlush(any());
     }
 
     @Test
-    void concurrentDuplicateEmailIsConflict() {
-        // Another request saved the same email between the exists check and the insert
-        AppUser mapped = new AppUser();
-        when(mapper.requestToEntity(request)).thenReturn(mapped);
-        when(passwordEncoder.encode(request.getPassword())).thenReturn("encoded-password-hash");
-        when(repository.saveAndFlush(mapped)).thenThrow(new DataIntegrityViolationException("uq_app_user_email"));
+    void bootstrapAdmin_weakPassword_failsStartup() {
+        when(repository.findByEmailIgnoreCase("root@email.com")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.createUser(request)).isInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining("Email is already registered")
-                .hasFieldOrPropertyWithValue("statusCode", HttpStatus.CONFLICT);
+        assertThatThrownBy(() -> service.bootstrapAdmin("Root", "root@email.com", "short"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(PasswordUtils.INVALID_PASSWORD_MESSAGE);
 
-        verifyNoInteractions(outboxEventService);
+        verify(repository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void changeRole_toMerchant_savesAndRecordsEvent() {
+        // The acting admin is logged
+        SecurityContextHolder.getContext().setAuthentication(new TestingAuthenticationToken("admin@email.com", null));
+        when(repository.findById(1L)).thenReturn(Optional.of(testUser));
+        when(repository.saveAndFlush(testUser)).thenReturn(testUser);
+        when(mapper.toDto(testUser)).thenReturn(testUserDto);
+
+        assertThat(service.changeRole(1L, UserRole.MERCHANT)).isSameAs(testUserDto);
+
+        assertThat(testUser.getRole()).isEqualTo(UserRole.MERCHANT);
+        verify(outboxEventService).record("user", 1L, "UserRoleChanged", testUserDto);
+    }
+
+    @Test
+    void changeRole_toAdmin_isRefusedBeforeLookingUpTheUser() {
+        assertThatThrownBy(() -> service.changeRole(1L, UserRole.ADMIN))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasFieldOrPropertyWithValue("statusCode", HttpStatus.BAD_REQUEST);
+
+        verifyNoInteractions(repository, outboxEventService);
     }
 
     @Test

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://contracts.wallet-platform.local/events/TransferCreated.v1.schema.json",
   "title": "TransferCreated",
-  "description": "Money moved between two wallet accounts.",
+  "description": "No longer published: transfers are booked in the request that creates them, so the first event of a transfer is TransferCompleted or TransferFailed. Kept so consumers can still read old messages.",
   "x-event-type": "TransferCreated",
   "x-event-version": 1,
   "x-topic": "wallet.transfer",
@@ -81,5 +81,6 @@
       "status": "COMPLETED",
       "failureReason": null
     }
-  ]
+  ],
+  "deprecated": true
 }

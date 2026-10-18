@@ -1,6 +1,7 @@
 package com.waller.wallet_platform.hold.repository;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -30,6 +31,16 @@ public interface HoldRepository  extends JpaRepository<Hold,Long>
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select h from Hold h where h.id = :id")
     Optional<Hold> findByIdForUpdate(@Param("id") Long id);
+
+    // Holds in this status (ACTIVE) past expiresAt, oldest expiry first, for HoldExpiryJob; served by idx_hold_expiry.
+    // The status is a parameter because Hibernate renders an enum literal as 'ACTIVE'::HoldStatus, a type that
+    // doesn't exist (the column's type is hold_status).
+    @Query("""
+           select h.id from Hold h
+           where h.status = :status and h.expiresAt <= :now
+           order by h.expiresAt asc, h.id asc
+           """)
+    List<Long> findExpiredIds(@Param("status") HoldStatus status, @Param("now") Instant now, Pageable pageable);
 
     Page<Hold> findByAccountIdOrderByCreatedAtDescIdDesc(Long accountId, Pageable pageable);
 
