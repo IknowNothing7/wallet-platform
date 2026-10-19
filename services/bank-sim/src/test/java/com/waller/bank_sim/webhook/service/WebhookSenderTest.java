@@ -12,6 +12,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
+import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -70,7 +71,7 @@ class WebhookSenderTest {
                 Duration.ZERO, MAX_ATTEMPTS, Duration.ofMillis(10), Duration.ofMillis(20), Duration.ofSeconds(2));
         signer = new WebhookSigner(properties);
         sender = new WebhookSender(properties, signer, scenarioService, paymentStore,
-                JsonMapper.builder().build(), MAX_RESENDS, Duration.ofMinutes(15));
+                JsonMapper.builder().build(), MAX_RESENDS, Duration.ofMinutes(15), ObservationRegistry.NOOP);
     }
 
     @AfterEach

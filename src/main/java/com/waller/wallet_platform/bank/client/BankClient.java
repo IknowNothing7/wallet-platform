@@ -2,6 +2,7 @@ package com.waller.wallet_platform.bank.client;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import io.micrometer.observation.ObservationRegistry;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -29,11 +30,17 @@ public class BankClient {
 
     public BankClient(
             @Value("${bank.base-url:http://localhost:8081}") String baseUrl,
-            @Value("${bank.request-timeout:PT5S}") Duration requestTimeout) {
+            @Value("${bank.request-timeout:PT5S}") Duration requestTimeout,
+            ObservationRegistry observationRegistry) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(requestTimeout);
         requestFactory.setReadTimeout(requestTimeout);
-        this.restClient = RestClient.builder().baseUrl(baseUrl).requestFactory(requestFactory).build();
+        // The registry makes each call a client span and sends traceparent, so bank-sim's spans join the trace
+        this.restClient = RestClient.builder()
+                .baseUrl(baseUrl)
+                .requestFactory(requestFactory)
+                .observationRegistry(observationRegistry)
+                .build();
     }
 
     public BankPayment createPayment(String idempotencyKey, BankPaymentRequest request) {

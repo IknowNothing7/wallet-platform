@@ -54,8 +54,16 @@ services:
       - './monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro'
     depends_on:
       - prometheus
+      - jaeger
     ports:
       - "3001:3000"   # 3000 is the frontend (app.cors.allowed-origins)
+  jaeger:
+    # Receives the services' traces over OTLP (4318 HTTP, 4317 gRPC) and keeps them in memory; UI on 16686
+    image: 'jaegertracing/jaeger:2.10.0'
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
 
   # --- The services (profile "app"); same host ports as bootRun, so stop any locally running instance first ---
 
@@ -78,6 +86,7 @@ services:
       # The first ADMIN, created on startup if the email is free; leave ADMIN_EMAIL empty to skip
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
     depends_on: [postgres, kafka]
     restart: on-failure   # Flyway fails startup if Postgres isn't accepting connections yet
     ports:
@@ -92,6 +101,7 @@ services:
     environment:
       BANK_SIM_WEBHOOK_URL: http://wallet-service:8080/webhooks/bank
       BANK_SIM_WEBHOOK_SECRET: ${BANK_SIM_WEBHOOK_SECRET:-change-me-local-only}
+      OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
       - "8081:8081"
   notification-service:
@@ -106,6 +116,7 @@ services:
       NOTIFICATION_DB_PASSWORD: secret
       KAFKA_BOOTSTRAP_SERVERS: kafka:19092
       WALLET_JWKS_URI: http://wallet-service:8080/.well-known/jwks.json
+      OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
     depends_on: [postgres, kafka]
     restart: on-failure   # Flyway fails startup if Postgres isn't accepting connections yet
     ports:

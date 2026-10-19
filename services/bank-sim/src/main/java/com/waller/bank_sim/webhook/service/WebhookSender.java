@@ -5,6 +5,8 @@ import java.time.Instant;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import io.micrometer.context.ContextSnapshotFactory;
+import io.micrometer.observation.ObservationRegistry;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -40,6 +42,8 @@ public class WebhookSender {
     private final JsonMapper jsonMapper;
     private final RestClient restClient;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
+    // Carries the trace of the payment request onto the scheduler thread, so the webhook joins that trace
+    private final ContextSnapshotFactory contextSnapshots = ContextSnapshotFactory.builder().build();
     private final RateLimiter resendLimiter;
 
     public WebhookSender(
@@ -49,7 +53,8 @@ public class WebhookSender {
             PaymentStore paymentStore,
             JsonMapper jsonMapper,
             @Value("${bank-sim.webhook.resend.max-requests:5}") int maxResends,
-            @Value("${bank-sim.webhook.resend.window:PT15M}") Duration resendWindow) {
+            @Value("${bank-sim.webhook.resend.window:PT15M}") Duration resendWindow,
+            ObservationRegistry observationRegistry) {
         this.properties = properties;
         this.signer = signer;
         this.scenarioService = scenarioService;
@@ -58,14 +63,17 @@ public class WebhookSender {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(properties.requestTimeout());
         requestFactory.setReadTimeout(properties.requestTimeout());
-        this.restClient = RestClient.builder().requestFactory(requestFactory).build();
+        this.restClient = RestClient.builder()
+                .requestFactory(requestFactory)
+                .observationRegistry(observationRegistry)
+                .build();
         this.resendLimiter = new RateLimiter(maxResends, resendWindow);
         scheduler.scheduleAtFixedRate(resendLimiter::evictExpired,
                 resendWindow.toMillis(), resendWindow.toMillis(), TimeUnit.MILLISECONDS);
     }
 
     public void scheduleResult(Payment payment, PaymentOutcome outcome) {
-        scheduler.schedule(() -> {
+        schedule(() -> {
             PaymentStatus status = outcome.succeeded() ? PaymentStatus.SUCCEEDED : PaymentStatus.FAILED;
             if (!payment.settle(status, outcome.failureReason())) {
                 log.info("Not settling payment {}: already {}", payment.getReference(), payment.getStatus());
@@ -80,7 +88,7 @@ public class WebhookSender {
             if (mode == WebhookMode.DUPLICATE) {
                 deliver(payment, 1);
             }
-        }, properties.delay().toMillis(), TimeUnit.MILLISECONDS);
+        }, properties.delay());
     }
 
     public void resend(String reference) {
@@ -92,7 +100,7 @@ public class WebhookSender {
         if (!resendLimiter.tryAcquire(reference)) {
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, TOO_MANY_RESENDS);
         }
-        scheduler.execute(() -> deliver(payment, 1));
+        schedule(() -> deliver(payment, 1), Duration.ZERO);
     }
 
     private void deliver(Payment payment, int attempt) {
@@ -109,8 +117,12 @@ public class WebhookSender {
             Duration delay = backoff(attempt);
             log.warn("Webhook for payment {} failed (attempt {}/{}), retrying in {}: {}",
                     payment.getReference(), attempt, properties.maxAttempts(), delay, e.getMessage());
-            scheduler.schedule(() -> deliver(payment, attempt + 1), delay.toMillis(), TimeUnit.MILLISECONDS);
+            schedule(() -> deliver(payment, attempt + 1), delay);
         }
+    }
+
+    private void schedule(Runnable task, Duration delay) {
+        scheduler.schedule(contextSnapshots.captureAll().wrap(task), delay.toMillis(), TimeUnit.MILLISECONDS);
     }
 
     private void post(WebhookPayload payload) {

@@ -33,6 +33,9 @@ spring:
     listener:
       # Offsets are committed only after the handler's transaction commits
       ack-mode: record
+      observation-enabled: true   # continues the trace from the event's traceparent header
+    template:
+      observation-enabled: true
     # Only used by the DLT publisher: it forwards the record as consumed (String key and value)
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
@@ -44,6 +47,21 @@ spring:
       resourceserver:
         jwt:
           jwk-set-uri: ${WALLET_JWKS_URI:http://localhost:8080/.well-known/jwks.json}
+
+management:
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}   # every request locally; lower it where traffic is real
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          # Jaeger in compose.yaml; service.name in the traces is spring.application.name
+          endpoint: ${OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  otlp:
+    metrics:
+      export:
+        enabled: false   # metrics stay on Prometheus; only traces go over OTLP
 
 server:
   port: ${SERVER_PORT:8082}

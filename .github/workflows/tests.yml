@@ -27,6 +27,10 @@ jobs:
       - name: Run tests
         run: ./gradlew test --continue
 
+      # Mutation testing gate for the ledger (thresholds in build.gradle); unit tests only, about half a minute
+      - name: Mutation tests (ledger)
+        run: ./gradlew pitest
+
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v4
@@ -35,3 +39,4 @@ jobs:
           path: |
             build/reports/tests/
             services/*/build/reports/tests/
+            build/reports/pitest/

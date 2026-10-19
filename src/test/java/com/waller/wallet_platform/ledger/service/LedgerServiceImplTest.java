@@ -3,6 +3,7 @@ package com.waller.wallet_platform.ledger.service;
 import static com.waller.wallet_platform.support.TestData.account;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyCollection;
@@ -19,6 +20,8 @@ import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Captor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -29,10 +32,13 @@ import com.waller.wallet_platform.account.entity.Account;
 import com.waller.wallet_platform.account.entity.AccountType;
 import com.waller.wallet_platform.account.entity.SystemAccountKind;
 import com.waller.wallet_platform.account.repository.AccountRepository;
+import com.waller.wallet_platform.ledger.dto.JournalEntryDto;
 import com.waller.wallet_platform.ledger.dto.JournalEntryRequest;
+import com.waller.wallet_platform.ledger.dto.PostingDto;
 import com.waller.wallet_platform.ledger.dto.PostingRequest;
 import com.waller.wallet_platform.ledger.entity.JournalEntry;
 import com.waller.wallet_platform.ledger.entity.JournalEntryType;
+import com.waller.wallet_platform.ledger.entity.Posting;
 import com.waller.wallet_platform.ledger.entity.PostingDirection;
 import com.waller.wallet_platform.ledger.mapper.JournalEntryMapper;
 import com.waller.wallet_platform.ledger.mapper.PostingMapper;
@@ -60,6 +66,12 @@ class LedgerServiceImplTest {
     @InjectMocks
     private LedgerServiceImpl ledgerService;
 
+    @Captor
+    private ArgumentCaptor<JournalEntry> savedEntry;
+
+    @Captor
+    private ArgumentCaptor<List<Posting>> savedPostings;
+
     private Account bankClearing;
     private Account fees;
     private Account user;
@@ -86,6 +98,35 @@ class LedgerServiceImplTest {
         assertThat(bankClearing.getBalance()).isEqualTo(-600L);
         assertThat(user.getBalance()).isEqualTo(600L);
         verify(postingRepository).saveAll(anyList());
+    }
+
+    // What is written is the record of the money movement: an entry with the request's reference, one posting per line
+    @Test
+    void post_writesTheEntryAndOnePostingPerLineAndReturnsThem() {
+        stubLocked(user, bankClearing);
+        stubWrites();
+        List<PostingDto> postingDtos = List.of(PostingDto.builder().id(1L).build());
+        JournalEntryDto entryDto = JournalEntryDto.builder().id(50L).build();
+        when(postingMapper.toDtos(anyList())).thenReturn(postingDtos);
+        when(journalEntryMapper.toDto(any(JournalEntry.class), eq(postingDtos))).thenReturn(entryDto);
+
+        JournalEntryDto result = ledgerService.post(new JournalEntryRequest(
+                JournalEntryType.DEPOSIT, "deposit 7", "deposit", 7L,
+                List.of(line(1L, PostingDirection.DEBIT, 100), line(10L, PostingDirection.CREDIT, 100))));
+
+        assertThat(result).isSameAs(entryDto);
+        verify(journalEntryRepository).save(savedEntry.capture());
+        assertThat(savedEntry.getValue())
+                .extracting(JournalEntry::getEntryType, JournalEntry::getDescription,
+                        JournalEntry::getReferenceType, JournalEntry::getReferenceId)
+                .containsExactly(JournalEntryType.DEPOSIT, "deposit 7", "deposit", 7L);
+        verify(postingRepository).saveAll(savedPostings.capture());
+        assertThat(savedPostings.getValue())
+                .extracting(Posting::getJournalEntryId, Posting::getAccountId, Posting::getDirection,
+                        Posting::getAmount, Posting::getCurrency)
+                .containsExactly(
+                        tuple(50L, 1L, PostingDirection.DEBIT, 100L, "USD"),
+                        tuple(50L, 10L, PostingDirection.CREDIT, 100L, "USD"));
     }
 
     // Every account of the entry in one locking query, whose order (users, then system) the repository applies
@@ -120,6 +161,22 @@ class LedgerServiceImplTest {
         assertThat(user.getBalance()).isEqualTo(99L);
         assertThat(other.getBalance()).isZero();
         verifyNoInteractions(journalEntryRepository, postingRepository);
+    }
+
+    @Test
+    void post_userAccountMaySpendItsWholeBalance() {
+        Account other = account(11L, "USD");
+        other.setBalance(0L);
+        user.setBalance(100L);
+        stubLocked(user, other);
+        stubWrites();
+
+        ledgerService.post(entry(
+                line(10L, PostingDirection.DEBIT, 100),
+                line(11L, PostingDirection.CREDIT, 100)));
+
+        assertThat(user.getBalance()).isZero();
+        assertThat(other.getBalance()).isEqualTo(100L);
     }
 
     @Test
