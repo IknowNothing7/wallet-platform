@@ -12,6 +12,7 @@ import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 
+import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -55,7 +56,8 @@ class BankClientTest {
         // One thread per request, so the held /slow request doesn't block the others
         server.setExecutor(Executors.newCachedThreadPool());
         server.start();
-        client = new BankClient("http://localhost:" + server.getAddress().getPort(), Duration.ofMillis(500));
+        client = new BankClient("http://localhost:" + server.getAddress().getPort(), Duration.ofMillis(500),
+                ObservationRegistry.NOOP);
     }
 
     @AfterEach
@@ -114,7 +116,8 @@ class BankClientTest {
     @Test
     void timeout_isNotTreatedAsRejection() {
         BankClient slowClient = new BankClient(
-                "http://localhost:" + server.getAddress().getPort() + "/slow", Duration.ofMillis(200));
+                "http://localhost:" + server.getAddress().getPort() + "/slow", Duration.ofMillis(200),
+                ObservationRegistry.NOOP);
 
         // Depending on where the read times out RestClient throws ResourceAccessException or a plain
         // RestClientException; what matters is that it's a timeout and not a rejection

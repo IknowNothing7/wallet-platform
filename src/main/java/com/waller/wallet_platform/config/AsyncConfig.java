@@ -4,6 +4,7 @@ import java.util.concurrent.Executor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.task.support.ContextPropagatingTaskDecorator;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import lombok.extern.slf4j.Slf4j;
@@ -30,6 +31,8 @@ public class AsyncConfig {
         executor.setCorePoolSize(threads);
         executor.setMaxPoolSize(threads);
         executor.setQueueCapacity(queueCapacity);
+        // Keeps the request's trace (and MDC trace ids) on the worker thread, so the bank call is part of it
+        executor.setTaskDecorator(new ContextPropagatingTaskDecorator());
         executor.setRejectedExecutionHandler((task, pool) ->
                 log.warn("Bank submission queue full ({}), leaving the deposit to reconciliation", queueCapacity));
         // Let in-flight bank calls finish on shutdown; anything still queued is picked up by reconciliation

@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.json.JsonMapper;
+import io.micrometer.tracing.Tracer;
 import com.waller.wallet_platform.common.web.PageResponse;
 import com.waller.wallet_platform.common.util.ApiUtils;
 import lombok.RequiredArgsConstructor;
@@ -16,6 +17,7 @@ import com.waller.wallet_platform.outbox.dto.OutboxEventDto;
 import com.waller.wallet_platform.outbox.entity.OutboxEvent;
 import com.waller.wallet_platform.outbox.entity.OutboxStatus;
 import com.waller.wallet_platform.outbox.mapper.OutboxEventMapper;
+import com.waller.wallet_platform.outbox.messaging.TraceParent;
 import com.waller.wallet_platform.outbox.repository.OutboxRepository;
 
 // Reads and retries are admin-only (enforced in the controller); record() is called by the business services
@@ -32,6 +34,7 @@ public class OutboxEventServiceImpl implements OutboxEventService {
 
     private final OutboxRepository outboxRepository;
     private final OutboxEventMapper outboxEventMapper;
+    private final Tracer tracer;
 
     @Override
     @Transactional(readOnly = true)
@@ -73,6 +76,7 @@ public class OutboxEventServiceImpl implements OutboxEventService {
         event.setAggregateId(aggregateId);
         event.setEventType(eventType);
         event.setPayload(PAYLOAD_MAPPER.valueToTree(payload));
+        event.setTraceParent(TraceParent.current(tracer));
         outboxRepository.save(event);
     }
 

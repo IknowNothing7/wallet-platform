@@ -19,6 +19,7 @@ wallet-service writes events to its outbox table; `OutboxPublisher` sends them t
 | Key | aggregate id as a decimal string, so all events of one aggregate land in one partition, in order |
 | Value | JSON payload described by the schema |
 | Headers | `event-id` (outbox row id, unique: deduplicate by it), `event-type` (= schema title), `aggregate-type`, `aggregate-id`, `created-at` |
+| Trace | `traceparent` ([W3C Trace Context](https://www.w3.org/TR/trace-context/)): continues the trace of the request that caused the event. Optional for consumers to use; treat the flags as a bit field |
 
 | Event | Topic | Payload |
 |---|---|---|

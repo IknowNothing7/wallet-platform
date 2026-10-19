@@ -18,6 +18,7 @@ import org.apache.kafka.common.errors.NetworkException;
 import org.apache.kafka.common.errors.RecordTooLargeException;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.header.Headers;
+import io.micrometer.tracing.Tracer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -53,7 +54,7 @@ class OutboxPublisherTest {
     }
 
     private OutboxPublisher publisher(Duration initialBackoff, Duration maxBackoff) {
-        return new OutboxPublisher(repository, kafkaTemplate, transactionTemplate,
+        return new OutboxPublisher(repository, kafkaTemplate, transactionTemplate, Tracer.NOOP,
                 "wallet.", 100, MAX_ATTEMPTS, Duration.ofSeconds(1), initialBackoff, maxBackoff);
     }
 

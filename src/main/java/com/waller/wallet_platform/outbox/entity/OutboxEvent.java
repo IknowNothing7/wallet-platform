@@ -72,4 +72,8 @@ public class OutboxEvent implements Serializable {
 
     @Column(name = "last_error", columnDefinition = "TEXT")
     private String lastError;
+
+    // W3C traceparent of the transaction that recorded the event; see TraceParent
+    @Column(name = "trace_parent", length = 55)
+    private String traceParent;
 }

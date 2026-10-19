@@ -24,7 +24,14 @@ Start only the infrastructure (Postgres, Kafka, Prometheus, Grafana), for runnin
 docker compose up
 ```
 
-Grafana is on http://localhost:3001 and Prometheus on http://localhost:9090.
+Grafana is on http://localhost:3001, Prometheus on http://localhost:9090 and Jaeger (traces) on http://localhost:16686.
+
+### Tracing
+
+All three services send OpenTelemetry traces over OTLP to Jaeger (`OTLP_TRACES_ENDPOINT`, default
+`http://localhost:4318/v1/traces`). A deposit is one trace end to end: the HTTP request, the bank call, bank-sim's
+webhook, the outbox publish and notification-service's consumer. Log lines carry the trace and span ids. Every request
+is sampled; set `TRACING_SAMPLING_PROBABILITY` (0.0 to 1.0) to sample less. Grafana also has Jaeger as a data source.
 
 ### Admins and merchants
 
@@ -44,6 +51,13 @@ Docker must be running, because the integration tests use Testcontainers.
 
 ```bash
 ./gradlew test
+```
+
+The ledger also has a mutation testing gate ([PIT](https://pitest.org)): its unit tests must catch deliberate changes
+to the code that moves money. It fails below a 95% mutation score; the report is in `build/reports/pitest/`.
+
+```bash
+./gradlew pitest
 ```
 
 ## More

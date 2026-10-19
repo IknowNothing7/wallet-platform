@@ -15,6 +15,8 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import lombok.extern.slf4j.Slf4j;
 import com.waller.wallet_platform.outbox.repository.OutboxRepository;
 import com.waller.wallet_platform.outbox.entity.OutboxEvent;
@@ -31,6 +33,7 @@ public class OutboxPublisher {
     private final OutboxRepository outboxRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final TransactionTemplate transactionTemplate;
+    private final Tracer tracer;
     private final String topicPrefix;
     private final int batchSize;
     private final int maxAttempts;
@@ -46,6 +49,7 @@ public class OutboxPublisher {
             OutboxRepository outboxRepository,
             KafkaTemplate<String, String> kafkaTemplate,
             TransactionTemplate transactionTemplate,
+            Tracer tracer,
             @Value("${outbox.publisher.topic-prefix:wallet.}") String topicPrefix,
             @Value("${outbox.publisher.batch-size:100}") int batchSize,
             @Value("${outbox.publisher.max-attempts:10}") int maxAttempts,
@@ -55,6 +59,7 @@ public class OutboxPublisher {
         this.outboxRepository = outboxRepository;
         this.kafkaTemplate = kafkaTemplate;
         this.transactionTemplate = transactionTemplate;
+        this.tracer = tracer;
         this.topicPrefix = topicPrefix;
         this.batchSize = batchSize;
         this.maxAttempts = maxAttempts;
@@ -143,7 +148,27 @@ public class OutboxPublisher {
         addHeader(record, "aggregate-type", event.getAggregateType());
         addHeader(record, "aggregate-id", String.valueOf(event.getAggregateId()));
         addHeader(record, "created-at", String.valueOf(event.getCreatedAt()));
-        kafkaTemplate.send(record).get(sendTimeout.toMillis(), TimeUnit.MILLISECONDS);
+        // A child of the span that recorded the event; KafkaTemplate's send span (and its traceparent header) nest
+        // under it, so consumers continue the original request's trace
+        Span span = publishSpan(event).start();
+        try (Tracer.SpanInScope ignored = tracer.withSpan(span)) {
+            kafkaTemplate.send(record).get(sendTimeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (Exception e) {
+            span.error(e);
+            throw e;
+        } finally {
+            span.end();
+        }
+    }
+
+    private Span.Builder publishSpan(OutboxEvent event) {
+        Span.Builder builder = tracer.spanBuilder()
+                .name("outbox publish")
+                .tag("outbox.event.id", String.valueOf(event.getId()))
+                .tag("outbox.event.type", event.getEventType())
+                .tag("outbox.attempt", String.valueOf(event.getAttempts() + 1));
+        TraceParent.parse(tracer, event.getTraceParent()).ifPresent(builder::setParent);
+        return builder;
     }
 
     private static void addHeader(ProducerRecord<String, String> record, String name, String value) {

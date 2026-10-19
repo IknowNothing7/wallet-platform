@@ -57,6 +57,11 @@ Every event the application writes during the integration tests is validated aga
 test (`IntegrationTest`), and every schema's examples are validated as well (`EventSchemaExamplesTest`). An event
 without a schema fails the build.
 
+Events keep the trace of the request that caused them. The outbox row stores that span's W3C `traceparent`
+(`trace_parent`), and `OutboxPublisher` sends each event in a span under it, so the Kafka `traceparent` header leads
+consumers back into the original trace rather than into a trace of the poll. The poll itself is not observed
+(`ObservabilityConfig`): an open observation would become the parent of the Kafka send span.
+
 ## Schema choices
 
 | Question | Decision |

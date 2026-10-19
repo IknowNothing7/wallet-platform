@@ -2,6 +2,21 @@ spring:
   application:
     name: bank-sim
 
+management:
+  tracing:
+    sampling:
+      probability: ${TRACING_SAMPLING_PROBABILITY:1.0}   # every request locally; lower it where traffic is real
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          # Jaeger in compose.yaml; service.name in the traces is spring.application.name
+          endpoint: ${OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  otlp:
+    metrics:
+      export:
+        enabled: false   # metrics stay on Prometheus; only traces go over OTLP
+
 server:
   port: ${SERVER_PORT:8081}
 
