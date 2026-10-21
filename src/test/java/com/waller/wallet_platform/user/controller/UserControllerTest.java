@@ -140,6 +140,21 @@ class UserControllerTest extends IntegrationTest {
         changeRole(admin, shop.getId(), "USER").statusCode(200).body("payload.role", equalTo("USER"));
     }
 
+    // Each change records its own UserRoleChanged; the outbox dedup used to reject the second one for the same user
+    @Test
+    void merchantGrantedThroughTheApiCanBeTurnedBackIntoUser() {
+        AppUser admin = appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));
+        AppUser shop = appUserRepository.save(user("Shop", "shop@email.com", UserRole.USER));
+
+        changeRole(admin, shop.getId(), "MERCHANT").statusCode(200).body("payload.role", equalTo("MERCHANT"));
+        changeRole(admin, shop.getId(), "USER").statusCode(200).body("payload.role", equalTo("USER"));
+
+        assertThat(appUserRepository.findById(shop.getId()).orElseThrow().getRole()).isEqualTo(UserRole.USER);
+        assertThat(outboxRepository.findAll())
+                .extracting(event -> event.getPayload().get("role").asText())
+                .containsExactly("MERCHANT", "USER");
+    }
+
     @Test
     void adminRoleCanNotBeGranted() {
         AppUser admin = appUserRepository.save(user("Admin", "admin@email.com", UserRole.ADMIN));

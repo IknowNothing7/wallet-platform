@@ -14,25 +14,14 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+// One event of each type per aggregate, except repeatable ones like UserRoleChanged: a partial unique index
+// (uq_outbox_dedup, V16), which @UniqueConstraint can't express
 @Entity
-@Table(
-    name = "outbox_event",
-    uniqueConstraints = {
-        @UniqueConstraint(
-            name = "uq_outbox_dedup",
-            columnNames = {
-                "aggregate_type",
-                "aggregate_id",
-                "event_type"
-            }
-        )
-    }
-)
+@Table(name = "outbox_event")
 @Getter
 @Setter
 @NoArgsConstructor
