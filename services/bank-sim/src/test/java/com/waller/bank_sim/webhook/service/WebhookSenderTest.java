@@ -87,6 +87,10 @@ class WebhookSenderTest {
         sender.scheduleResult(payment, PaymentOutcome.success());
 
         Received webhook = next();
+        // TODO: Substring checks don't pin the contract. Validate the body against
+        //  contracts/webhooks/BankPaymentResult.v1.schema.json (as wallet-service's EventSchemaExamplesTest does for
+        //  events): failureReason must be present as null, occurredAt an ISO date-time, not epoch numbers. Also assert
+        //  Content-Type: application/json.
         assertThat(webhook.body()).contains("\"reference\":\"bsim_1\"", "\"status\":\"SUCCEEDED\"");
         assertThat(webhook.signature()).isEqualTo(signer.sign(Long.parseLong(webhook.timestamp()), webhook.body()));
         assertThat(payment.getStatus()).isEqualTo(PaymentStatus.SUCCEEDED);
@@ -120,6 +124,10 @@ class WebhookSenderTest {
         assertThat(payment.getWebhookDeliveredAt()).isNotNull();
     }
 
+    // TODO: Missing: the backoff doubles and stops at maxBackoff. Record the arrival times in the handler and check the
+    //  gaps (with initialBackoff 10ms / maxBackoff 20ms: ~10, ~20, ~20), or move backoff() somewhere testable.
+    // TODO: Missing: wallet-service unreachable (connection refused) and a response slower than requestTimeout. Both
+    //  must count as failed attempts and be retried, not kill the scheduler thread.
     @Test
     void failedDelivery_givesUpAfterMaxAttempts() throws InterruptedException {
         for (int i = 0; i < MAX_ATTEMPTS + 1; i++) {
@@ -181,6 +189,12 @@ class WebhookSenderTest {
         assertThat(next().body()).contains("\"reference\":\"bsim_1\"");
     }
 
+    // TODO: A CANCELLED payment is not PENDING, so resend() delivers a webhook with "status":"CANCELLED". The contract
+    //  allows only SUCCEEDED and FAILED, and PaymentStatus says no webhook is sent for a cancelled payment
+    //  (wallet-service does map it to EXPIRED). Decide: refuse with 409 like PENDING, or add CANCELLED to the schema.
+    //  Then add resend_cancelledPayment_* for whichever it is.
+    // TODO: Missing: resend in DROP mode still delivers (it bypasses the scenario on purpose; that's how a dropped
+    //  result is recovered by hand). Pin that so a refactor doesn't route resend through the mode check.
     @Test
     void resend_pendingPayment_returns409() {
         payment("bsim_1");
@@ -236,4 +250,14 @@ class WebhookSenderTest {
                 .isInstanceOfSatisfying(ResponseStatusException.class,
                         e -> assertThat(e.getStatusCode()).isEqualTo(status));
     }
+
+    // TODO: RateLimiter has no test of its own. It reads Instant.now() directly, so the window can't be moved without
+    //  sleeping. Give it a Clock, then cover: the limit resets once the window has passed, evictExpired removes only
+    //  expired windows, and the boundary (exactly start + window counts as expired).
+    // TODO: Missing: the webhook joins the payment request's trace (contextSnapshots + the observation registry). With
+    //  ObservationRegistry.NOOP nothing checks that a traceparent header is sent; see the TODO in wallet-service's
+    //  TraceContextContractTest for the receiving side.
+    // TODO: ControlController.reset() clears the store, but results already scheduled on the executor still settle and
+    //  deliver a webhook for a payment that GET /payments/{reference} now answers 404. Decide whether reset should
+    //  also cancel pending tasks (e.g. settle every PENDING payment as CANCELLED before clearing), then test it.
 }

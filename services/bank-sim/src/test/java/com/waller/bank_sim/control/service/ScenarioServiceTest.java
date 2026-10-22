@@ -74,6 +74,13 @@ class ScenarioServiceTest {
         assertThat(scenarioService.get()).isEqualTo(Scenario.happyPath());
     }
 
+    // TODO: Missing: latency. A small latency (e.g. 50ms) delays applyBeforeProcessing by at least that much, a zero or
+    //  negative one doesn't sleep, and an interrupted sleep returns with the thread's interrupt flag still set.
+    // TODO: Missing: the failure roll happens after the sleep (a slow request can still fail). With latency + failureRate
+    //  1.0, the 503 comes only after the delay; this is what trips wallet-service's timeout before its retry.
+    // TODO: Scenario's @DecimalMin/@DecimalMax/@NotNull are never exercised. Cover them through PUT /control/scenario
+    //  (declineRate 1.5, a missing outcome or webhookMode gives 400 and leaves the current scenario unchanged).
+
     private static Scenario scenario(Outcome outcome, double declineRate, double failureRate, double lostResponseRate) {
         return new Scenario(outcome, declineRate, Duration.ZERO, failureRate, lostResponseRate, WebhookMode.NORMAL);
     }

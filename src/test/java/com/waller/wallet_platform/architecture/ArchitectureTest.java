@@ -1,20 +1,33 @@
 package com.waller.wallet_platform.architecture;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noFields;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noMethods;
 import static com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices;
+
+import java.math.BigDecimal;
+import java.util.Arrays;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.springframework.stereotype.Repository;
+import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.tngtech.archunit.core.domain.Dependency;
+import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.properties.CanBeAnnotated;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
+import com.tngtech.archunit.lang.ArchCondition;
+import com.tngtech.archunit.lang.ConditionEvents;
+import com.tngtech.archunit.lang.SimpleConditionEvent;
+import com.tngtech.archunit.library.GeneralCodingRules;
 
 import jakarta.persistence.Entity;
 
@@ -25,6 +38,15 @@ import jakarta.persistence.Entity;
 class ArchitectureTest {
 
     private static final String ROOT = "com.waller.wallet_platform";
+
+    // Feature modules. common, config and security are shared infrastructure, not features.
+    private static final String[] FEATURES =
+            {"account", "auth", "bank", "deposit", "hold", "ledger", "outbox", "transfer", "user"};
+
+    // Small single-purpose packages that are not split into controller/entity/repository sub-packages.
+    private static final String BANK_WEBHOOK = ROOT + ".bank.webhook";
+    private static final String SECURITY = ROOT + ".security";
+    private static final String IDEMPOTENCY = ROOT + ".common.idempotency";
 
     private static JavaClasses classes;
 
@@ -59,100 +81,201 @@ class ArchitectureTest {
                 .check(classes);
     }
 
-    // TODO: entities should not know DTOs or mappers (the mapper depends on both, not the other way round).
-    //  Check whether any entity has a from(dto)/toDto() helper before enabling.
-    @Disabled("TODO: verify against the current entities")
     @Test
     void entitiesDoNotDependOnDtos() {
         noClasses().that().resideInAPackage("..entity..")
                 .should().dependOnClassesThat().resideInAnyPackage("..dto..", "..mapper..")
+                .because("the mapper depends on the entity and the dto, not the other way round")
                 .check(classes);
     }
 
-    // --- Placement and naming ---
+    // --- Placement ---
 
-    // TODO: flat packages break this: bank.webhook.BankWebhookController, security.JwksController.
-    //  Move them, or exempt bank.webhook / security with resideInAnyPackage(...).
-    @Disabled("TODO: BankWebhookController, JwksController")
     @Test
     void restControllersLiveInControllerPackages() {
         classes().that().areAnnotatedWith(RestController.class)
-                .should().resideInAPackage("..controller..")
+                .should().resideInAnyPackage("..controller..", BANK_WEBHOOK, SECURITY)
                 .check(classes);
     }
 
-    // TODO: flat packages break this: bank.webhook.BankWebhookDeadLetter, common.idempotency.IdempotencyKey.
-    @Disabled("TODO: BankWebhookDeadLetter, IdempotencyKey")
     @Test
     void entitiesLiveInEntityPackages() {
         classes().that().areAnnotatedWith(Entity.class)
-                .should().resideInAPackage("..entity..")
+                .should().resideInAnyPackage("..entity..", BANK_WEBHOOK, IDEMPOTENCY)
                 .check(classes);
     }
 
-    // TODO: decide whether repositories are always Spring Data interfaces (then: "should be interfaces"),
-    //  or JdbcTemplate classes are allowed too (ShedLock, outbox claiming).
-    // TODO: common.idempotency.IdempotenceRepository breaks this (flat package).
-    @Disabled("TODO: IdempotenceRepository")
     @Test
     void repositoriesLiveInRepositoryPackages() {
-        classes().that().areAnnotatedWith(Repository.class)
-                .should().resideInAPackage("..repository..")
-                .allowEmptyShould(true)
+        classes().that().areAssignableTo(org.springframework.data.repository.Repository.class)
+                .or().areAnnotatedWith(Repository.class)
+                .should().resideInAnyPackage("..repository..", BANK_WEBHOOK, IDEMPOTENCY)
                 .check(classes);
     }
 
-    // TODO: naming conventions, e.g. *Controller, *Service / *ServiceImpl, *Repository, *Mapper, *Request / *Response.
-    //  Write them once the exceptions are known (listeners, jobs, AccountAccessChecker, ...).
+    // Native queries (outbox claiming, ...) live on the Spring Data interface too. A JdbcTemplate-based repository
+    // would have to be listed here.
+    @Test
+    void repositoriesAreSpringDataInterfaces() {
+        classes().that().haveSimpleNameEndingWith("Repository")
+                .should().beInterfaces()
+                .andShould().beAssignableTo(org.springframework.data.repository.Repository.class)
+                .check(classes);
+    }
+
+    // --- Naming ---
+
+    @Test
+    void controllersAreNamedController() {
+        classes().that().resideInAPackage("..controller..").and().areTopLevelClasses()
+                .should().haveSimpleNameEndingWith("Controller")
+                .andShould().beAnnotatedWith(RestController.class)
+                .check(classes);
+        classes().that().areAnnotatedWith(RestController.class)
+                .should().haveSimpleNameEndingWith("Controller")
+                .check(classes);
+    }
+
+    @Test
+    void servicesAreNamedService() {
+        classes().that().areAnnotatedWith(Service.class)
+                .should().haveSimpleNameEndingWith("Service").orShould().haveSimpleNameEndingWith("ServiceImpl")
+                .check(classes);
+        classes().that().resideInAPackage("..service..").and().areInterfaces()
+                .should().haveSimpleNameEndingWith("Service")
+                .check(classes);
+        classes().that().haveSimpleNameEndingWith("ServiceImpl")
+                .should(implementTheInterfaceTheyAreNamedAfter())
+                .check(classes);
+    }
+
+    // AppUserSpecifications (Specification factories for AppUserRepository) is the one class in a repository package.
+    @Test
+    void repositoryPackagesHoldRepositories() {
+        classes().that().resideInAPackage("..repository..").and().areTopLevelClasses()
+                .should().haveSimpleNameEndingWith("Repository").orShould().haveSimpleNameEndingWith("Specifications")
+                .check(classes);
+    }
+
+    // *MapperImpl are MapStruct's generated implementations.
+    @Test
+    void mappersAreNamedMapper() {
+        classes().that().resideInAPackage("..mapper..").and().areInterfaces()
+                .should().haveSimpleNameEndingWith("Mapper")
+                .check(classes);
+    }
+
+    @Test
+    void jobsAreNamedJob() {
+        classes().that().resideInAPackage("..job..").and().areTopLevelClasses()
+                .should().haveSimpleNameEndingWith("Job")
+                .check(classes);
+    }
+
+    // TODO: decide the dto naming. Today: bank.dto.BankPayment and BankPaymentResult (named after the bank's API),
+    //  user.dto.UserEvent (an outbox payload). Rename them, or allow those suffixes here, then enable.
+    @Disabled("TODO: BankPayment, BankPaymentResult, UserEvent")
+    @Test
+    void dtosAreNamedDtoRequestOrResponse() {
+        classes().that().resideInAPackage("..dto..").and().areTopLevelClasses().and().areNotEnums()
+                .should().haveSimpleNameEndingWith("Dto")
+                .orShould().haveSimpleNameEndingWith("Request")
+                .orShould().haveSimpleNameEndingWith("Response")
+                .check(classes);
+    }
 
     // --- Transactions ---
 
-    // TODO: @Transactional only on services. Today it is also in security/ and common/idempotency/; either allow
-    //  those packages explicitly or move the transaction into a service.
-    @Disabled("TODO: list the allowed exceptions")
+    // Besides the feature services: AppUserDetailsService and AccountAccessChecker (security) read users and
+    // accounts in a read-only transaction, and IdempotencyService lives in the flat common.idempotency package.
     @Test
     void transactionsStartInServices() {
         classes().that().areAnnotatedWith(Transactional.class)
                 .or().containAnyMethodsThat(CanBeAnnotated.Predicates.annotatedWith(Transactional.class))
-                .should().resideInAPackage("..service..")
+                .should().resideInAnyPackage("..service..", SECURITY, IDEMPOTENCY)
                 .check(classes);
     }
 
-    // TODO: controllers must not be @Transactional (a transaction around the whole request).
+    @Test
+    void controllersAreNotTransactional() {
+        String because = "a transaction around the whole request holds locks and connections while the response is"
+                + " written";
+        noClasses().that().resideInAPackage("..controller..").or().areAnnotatedWith(RestController.class)
+                .should().beAnnotatedWith(Transactional.class)
+                .because(because)
+                .check(classes);
+        noMethods().that().areDeclaredInClassesThat().areAnnotatedWith(RestController.class)
+                .should().beAnnotatedWith(Transactional.class)
+                .because(because)
+                .check(classes);
+    }
 
     // --- Ledger: the only way to move money ---
 
-    // TODO: only the ledger writes journal entries / postings. Today deposit, hold and transfer import
-    //  ledger.repository directly; route them through ledger.service, then enable.
+    // A dependency rule, not onlyBeAccessed(): the callers use getReferenceById, which ArchUnit attributes to
+    // JpaRepository, so an access rule passes while the dependency is there.
+    // TODO: deposit (DepositProcessingServiceImpl), hold (HoldServiceImpl) and transfer
+    //  (TransferProcessingServiceImpl) inject JournalEntryRepository only to call getReferenceById(entry.id()).
+    //  Have LedgerService return that reference (or store the journal entry id), then enable.
     @Disabled("TODO: deposit, hold and transfer use ledger.repository directly")
     @Test
     void onlyTheLedgerUsesLedgerRepositories() {
-        classes().that().resideInAPackage(ROOT + ".ledger.repository..")
-                .should().onlyBeAccessed().byAnyPackage(ROOT + ".ledger..")
+        noClasses().that().resideOutsideOfPackage(ROOT + ".ledger..")
+                .should().dependOnClassesThat().resideInAPackage(ROOT + ".ledger.repository..")
                 .check(classes);
     }
 
-    // TODO: ledger entities are immutable once posted: no public setters on JournalEntry / Posting.
+    // TODO: JournalEntry and Posting carry a class-level @Setter, and LedgerServiceImpl.post builds them with
+    //  setters. Replace that with a builder or constructor, drop @Setter, then enable.
+    @Disabled("TODO: @Setter on JournalEntry and Posting")
+    @Test
+    void ledgerEntitiesAreImmutable() {
+        methods().that().areDeclaredInClassesThat().resideInAPackage(ROOT + ".ledger.entity")
+                .and().haveNameStartingWith("set")
+                .should().notBePublic()
+                .allowEmptyShould(true)
+                .because("a posted journal entry is never changed, only reversed by a new one")
+                .check(classes);
+    }
 
     // --- Module boundaries ---
 
-    // TODO: a feature exposes its service (and dto) packages; its repository and entity packages are private.
-    //  Today account.repository is used by deposit, hold, transfer and ledger; user.repository by account, auth
-    //  and hold. Decide per case: add a service method, or accept the dependency and list it here.
-    // TODO: generalise to every module (one test per module, or a custom ArchCondition comparing the
-    //  accessor's module with the target's).
+    // A module's repository and entity packages are its own; other modules go through its service (and dto).
+    // TODO: today account.repository is used by deposit, hold, ledger, security (AccountAccessChecker) and
+    //  transfer; user.repository by account, auth, common (IdempotencyService), hold and security; hold.repository
+    //  by transfer; ledger.repository by deposit, hold and transfer. Decide per case: add a service method, or
+    //  accept the dependency and exempt it here.
     @Disabled("TODO: modules use each other's repositories")
     @Test
-    void accountRepositoriesArePrivate() {
-        classes().that().resideInAPackage(ROOT + ".account.repository..")
-                .should().onlyBeAccessed().byAnyPackage(ROOT + ".account..")
+    void repositoriesAreModulePrivate() {
+        classes().that().resideInAnyPackage(featurePackages())
+                .or().resideInAnyPackage(ROOT + ".common..", ROOT + ".config..", SECURITY + "..")
+                .should(onlyDependOnTheirOwnModules("repository"))
                 .check(classes);
     }
 
-    // TODO: no cycles between modules. Current cycles: bank <-> deposit (the webhook calls deposit.service,
-    //  deposit calls bank.client) and auth <-> user (user imports auth.dto). Break them (move the shared DTO,
-    //  have the webhook publish an event, ...) and enable.
-    @Disabled("TODO: bank <-> deposit and auth <-> user cycles")
+    // TODO: entities reference each other across modules through JPA associations: Deposit, Hold and Transfer map
+    //  Account and JournalEntry; Account, Hold, RefreshToken and IdempotencyKey map AppUser. Services also use the
+    //  enums AccountStatus, SystemAccountKind, JournalEntryType, PostingDirection and HoldStatus. Decide whether
+    //  cross-module associations stay (then delete this rule) or become plain ids, with the shared enums moved to
+    //  dto.
+    @Disabled("TODO: cross-module JPA associations and enums")
+    @Test
+    void entitiesAreModulePrivate() {
+        classes().that().resideInAnyPackage(featurePackages())
+                .or().resideInAnyPackage(ROOT + ".common..", ROOT + ".config..", SECURITY + "..")
+                .should(onlyDependOnTheirOwnModules("entity"))
+                .check(classes);
+    }
+
+    // TODO: current cycles:
+    //  - bank <-> deposit: BankWebhookController calls deposit.service, deposit calls bank.client.
+    //  - auth <-> user: AppUserMapper maps auth.dto.RegistrationRequest.
+    //  - account <-> security: account services use AccountAccessChecker, which reads account.repository.
+    //  - common -> security / user (see commonIsALeaf), which closes a loop with every module that uses common.
+    //  Break them (move the shared DTO, have the webhook publish an event, move AccountAccessChecker into
+    //  account, ...) and enable.
+    @Disabled("TODO: bank <-> deposit, auth <-> user, account <-> security, common -> security/user")
     @Test
     void modulesAreFreeOfCycles() {
         slices().matching(ROOT + ".(*)..")
@@ -160,8 +283,25 @@ class ArchitectureTest {
                 .check(classes);
     }
 
-    // TODO: common/ is a leaf: it may not depend on any feature module.
-    // TODO: config/ and security/ may depend on features; features do not depend on config/.
+    // TODO: common.util.ApiUtils uses security.JwtTokenProvider; common.idempotency.IdempotencyKey and
+    //  IdempotencyService use user.entity.AppUser and user.repository.AppUserRepository. Pass the user id in
+    //  (or move idempotency into its own module), then enable.
+    @Disabled("TODO: ApiUtils -> security, idempotency -> user")
+    @Test
+    void commonIsALeaf() {
+        noClasses().that().resideInAPackage(ROOT + ".common..")
+                .should().dependOnClassesThat().resideInAnyPackage(featurePackages())
+                .orShould().dependOnClassesThat().resideInAnyPackage(ROOT + ".config..", SECURITY + "..")
+                .check(classes);
+    }
+
+    // config/ and security/ may depend on features (they wire them); the reverse is not allowed for config/.
+    @Test
+    void featuresDoNotDependOnConfig() {
+        noClasses().that().resideInAnyPackage(featurePackages())
+                .should().dependOnClassesThat().resideInAPackage(ROOT + ".config..")
+                .check(classes);
+    }
 
     // --- Outbox ---
 
@@ -173,14 +313,101 @@ class ArchitectureTest {
                 .check(classes);
     }
 
-    // TODO: other modules depend only on outbox.service, not on outbox.entity / outbox.repository / messaging.
+    // config.ObservabilityConfig is allowed to name OutboxPublisher (it keeps the poll loop out of tracing).
+    @Test
+    void otherModulesUseOnlyTheOutboxService() {
+        noClasses().that().resideOutsideOfPackages(ROOT + ".outbox..", ROOT + ".config..")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        ROOT + ".outbox.entity..", ROOT + ".outbox.repository..", ROOT + ".outbox.messaging..",
+                        ROOT + ".outbox.mapper..", ROOT + ".outbox.controller..")
+                .because("other modules record events through OutboxEventService, inside their own transaction")
+                .check(classes);
+    }
 
     // --- General hygiene ---
 
-    // TODO: no field injection (GeneralCodingRules.NO_CLASSES_SHOULD_USE_FIELD_INJECTION).
-    // TODO: no java.util.logging / System.out (GeneralCodingRules.NO_CLASSES_SHOULD_USE_JAVA_UTIL_LOGGING,
-    //  NO_CLASSES_SHOULD_ACCESS_STANDARD_STREAMS).
-    // TODO: no new BigDecimal(double) anywhere money is handled.
+    @Test
+    void noAutowiredFields() {
+        noFields()
+                .should().beAnnotatedWith("org.springframework.beans.factory.annotation.Autowired")
+                .orShould().beAnnotatedWith("jakarta.inject.Inject")
+                .orShould().beAnnotatedWith("jakarta.annotation.Resource")
+                .because("dependencies come in through the constructor (@RequiredArgsConstructor)")
+                .check(classes);
+    }
+
+    // The full ArchUnit rule also counts @Value fields.
+    // TODO: @Value fields: AuthServiceImpl (accessTokenLifetimeMillis, failedLoginWindow, maxFailedLogins),
+    //  RefreshTokenServiceImpl.refreshLifetime, SecurityConfig.allowedOrigins, DepositServiceImpl.pendingTtl,
+    //  HoldServiceImpl.maxTtl, JwtTokenProvider.lifetime. Move them to constructor parameters (or a
+    //  @ConfigurationProperties record), so unit tests don't need ReflectionTestUtils, then enable.
+    @Disabled("TODO: @Value fields in 7 classes")
+    @Test
+    void noFieldInjection() {
+        GeneralCodingRules.NO_CLASSES_SHOULD_USE_FIELD_INJECTION.check(classes);
+    }
+
+    @Test
+    void noJavaUtilLogging() {
+        GeneralCodingRules.NO_CLASSES_SHOULD_USE_JAVA_UTIL_LOGGING.check(classes);
+    }
+
+    @Test
+    void noStandardStreams() {
+        GeneralCodingRules.NO_CLASSES_SHOULD_ACCESS_STANDARD_STREAMS.check(classes);
+    }
+
+    @Test
+    void noBigDecimalFromDouble() {
+        noClasses().should().callConstructor(BigDecimal.class, double.class)
+                .because("new BigDecimal(0.1) is 0.1000000000000000055...; use BigDecimal.valueOf or a String")
+                .check(classes);
+    }
+
     // TODO: once the disabled rules are close, consider FreezingArchRule instead of @Disabled, so new violations
-    //  fail while the existing ones are paid down.
+    //  fail while the existing ones are paid down (needs a committed violation store).
+
+    // --- Helpers ---
+
+    private static String[] featurePackages() {
+        return Arrays.stream(FEATURES).map(feature -> ROOT + "." + feature + "..").toArray(String[]::new);
+    }
+
+    // Top-level package under ROOT (account, common, security, ...), or null for ROOT itself.
+    private static String moduleOf(JavaClass javaClass) {
+        String packageName = javaClass.getPackageName();
+        if (!packageName.startsWith(ROOT + ".")) {
+            return null;
+        }
+        return packageName.substring(ROOT.length() + 1).split("\\.")[0];
+    }
+
+    private static ArchCondition<JavaClass> onlyDependOnTheirOwnModules(String layer) {
+        return new ArchCondition<>("only use the " + layer + " packages of their own module") {
+            @Override
+            public void check(JavaClass javaClass, ConditionEvents events) {
+                String module = moduleOf(javaClass);
+                for (Dependency dependency : javaClass.getDirectDependenciesFromSelf()) {
+                    String targetModule = moduleOf(dependency.getTargetClass());
+                    if (targetModule != null && !targetModule.equals(module) && dependency.getTargetClass()
+                            .getPackageName().startsWith(ROOT + "." + targetModule + "." + layer)) {
+                        events.add(SimpleConditionEvent.violated(dependency, dependency.getDescription()));
+                    }
+                }
+            }
+        };
+    }
+
+    private static ArchCondition<JavaClass> implementTheInterfaceTheyAreNamedAfter() {
+        return new ArchCondition<>("implement the interface they are named after") {
+            @Override
+            public void check(JavaClass javaClass, ConditionEvents events) {
+                String expected = javaClass.getSimpleName().replaceFirst("Impl$", "");
+                boolean implementsIt = javaClass.getRawInterfaces().stream()
+                        .anyMatch(anInterface -> anInterface.getSimpleName().equals(expected));
+                events.add(new SimpleConditionEvent(javaClass, implementsIt,
+                        javaClass.getName() + " does not implement " + expected));
+            }
+        };
+    }
 }

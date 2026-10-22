@@ -41,6 +41,11 @@ class WebhookSignerTest {
         assertThat(new WebhookSigner(properties("other-secret")).sign(TIMESTAMP, BODY)).isNotEqualTo(SIGNATURE);
     }
 
+    // TODO: Missing: the body is signed as UTF-8 bytes. Add a vector with a non-ASCII body (e.g. a failureReason with
+    //  "é") and the same vector in BankWebhookVerifierTest; a platform-default charset on either side would break it.
+    // TODO: Missing: signatureCoversTheBody (one changed character gives a different signature). The verifier side
+    //  has it; the signer side only checks timestamp and secret.
+
     private static WebhookProperties properties(String secret) {
         return new WebhookProperties("http://unused", secret, Duration.ZERO, 1,
                 Duration.ZERO, Duration.ZERO, Duration.ofSeconds(1));
