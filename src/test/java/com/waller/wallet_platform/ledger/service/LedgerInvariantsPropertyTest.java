@@ -218,7 +218,8 @@ class LedgerInvariantsPropertyTest {
             total += amount;
             lines.add(line(pick(pool, random), PostingDirection.DEBIT, amount, currency));
         }
-        int credits = 1 + random.nextInt(3);
+        // No more credit lines than units to split, or a line would get 0 (or less), which the ledger rightly refuses
+        int credits = (int) Math.min(1 + random.nextInt(3), total);
         for (int i = 0; i < credits; i++) {
             // The last credit takes the rest; the others take a share, but at least 1 is left for each remaining one
             long amount = i == credits - 1 ? total : 1 + (long) (random.nextDouble() * (total - (credits - i)));
