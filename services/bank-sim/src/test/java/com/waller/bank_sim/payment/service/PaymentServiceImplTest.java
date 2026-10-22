@@ -60,6 +60,9 @@ class PaymentServiceImplTest {
         assertThat(result.amount()).isEqualTo(1000L);
         assertThat(result.walletDepositId()).isEqualTo("dep-1");
         assertThat(paymentService.getPayment(result.reference())).isEqualTo(result);
+        // TODO: any(), any() would also pass if the service scheduled a different payment or a hard-coded outcome.
+        //  Capture the arguments: the payment has result.reference(), and the outcome is the one decideOutcome returned
+        //  (use PaymentOutcome.declined(...) here so a default success can't pass by accident). Also assert currency.
         verify(webhookSender).scheduleResult(any(), any());
     }
 
@@ -152,10 +155,27 @@ class PaymentServiceImplTest {
                         e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
     }
 
+    // TODO: Missing: two threads calling createPayment with the same key at the same time get one payment and one
+    //  scheduleResult. PaymentStore.getOrCreate relies on computeIfAbsent for this; nothing tests it concurrently.
     @Test
     void getPayment_unknownReference_returns404() {
         assertThatThrownBy(() -> paymentService.getPayment("bsim_missing"))
                 .isInstanceOfSatisfying(ResponseStatusException.class,
                         e -> assertThat(e.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND));
     }
+
+    // TODO: Missing cases:
+    //  - getPayments returns newest first (Payment.createdAt is Instant.now(), so either give Payment a Clock or
+    //    accept equal timestamps; today the sort order is untested).
+    //  - The same request under two different keys creates two payments (the key, not the body, is the identity).
+    //  - A lost response after a 422 key reuse: applyAfterProcessing must not be reached on a 422 (verify it).
+    // TODO: PaymentController and ControlController have no tests. Add a @WebMvcTest for each:
+    //  - POST /payments: 202 with a body wallet-service's BankPayment can read; missing or blank Idempotency-Key, amount
+    //    0, currency "US" give 400; key reuse gives 422 (BankClient turns any 4xx into BankRejectedException).
+    //  - POST /payments/{ref}/cancel: 200 with the current status, 404 for an unknown reference.
+    //  - /control: GET/PUT scenario, POST /payments/{ref}/webhook gives 202 (404/409/429 from WebhookSender),
+    //    DELETE gives 204 and empties the store and resets the scenario.
+    // TODO: PaymentRequest only checks @Size(3) on currency, but contracts/webhooks/BankPaymentResult.v1.schema.json
+    //  requires ^[A-Z]{3}$. "usd" is accepted here and then echoed in a webhook that breaks the schema. Add @Pattern
+    //  and a test, or relax the schema.
 }
